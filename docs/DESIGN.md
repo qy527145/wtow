@@ -9,7 +9,7 @@
 
 | 项 | 内容 |
 | :--- | :--- |
-| 交付形态 | 一个 Rust 服务端二进制（内嵌前端静态资源）+ 一个 React 管理台 + 一个 Rust CLI |
+| 交付形态 | **两个独立交付物**：Web 程序（Rust 服务端 + 内嵌 React 管理台，单二进制）与 CLI（独立二进制、独立版本号）。两者分开构建、分开发布，只通过 HTTP API 契约耦合 |
 | 项目模型 | 单部署、多项目、共享库。项目之间数据完全隔离，可独立授权、独立归档 |
 | Agent 接入 | CLI 为默认，`wtow skill install` 分发 Skill；MCP 作为可选适配 |
 | 不包含 | 服务端模型调用、代码仓库托管、自动验收、多租户计费 |
@@ -47,14 +47,17 @@
 │  PostgreSQL    │            │ 本地卷 / S3      │
 └────────────────┘            └─────────────────┘
 
-         ▲ HTTPS + Bearer Token
-┌────────┴─────────┐
-│  wtow (CLI)      │── 被 Claude Code / 其他 Harness 调用
-│  内嵌 Skill 包    │
-└──────────────────┘
+         ┌──────────────────┐  HTTPS + Bearer Token   ┌───────────────────┐
+   │  wtow (CLI)      │ ──────────────────────▶ │  wtow-server      │
+   │  内嵌 Skill 包    │ ◀─── 安装包 / install.sh ─│  （Web 程序）      │
+   └──────────────────┘                         └───────────────────┘
+              ▲
+              └── 被 Claude Code / 其他 Harness 调用
 ```
 
 前端与 CLI 共用同一套 REST API，服务端不区分调用方。
+
+**CLI 与 Web 分开交付**：Web 二进制不内嵌 CLI，CLI 也不依赖服务端代码。Web 只额外承担一件事——提供 CLI 的下载页、安装脚本与版本清单。
 
 ---
 
@@ -84,40 +87,42 @@
 
 ## 4. 仓库结构
 
-Cargo workspace + 前端目录：
+Web 与 CLI 是两个独立的 Cargo 项目，各自构建、各自发布：
 
 ```
 wtow/
-├── Cargo.toml                 # [workspace]
-├── crates/
-│   ├── wtow-core/             # 服务端与 CLI 共用：领域类型、错误码、ID 规则
-│   │   └── src/{ids.rs, status.rs, error.rs, dto.rs}
-│   ├── wtow-server/
-│   │   ├── src/main.rs
-│   │   ├── src/config.rs      # env / TOML 配置
-│   │   ├── src/app.rs         # Router 组装、中间件
-│   │   ├── src/auth/          # 会话、PAT、角色校验
-│   │   ├── src/project/       # 项目上下文提取器
-│   │   ├── src/api/           # raw.rs / exec.rs / files.rs / stats.rs / admin.rs
-│   │   ├── src/domain/        # 状态迁移、认领、建联（纯函数 + 事务编排）
-│   │   ├── src/jobs/          # 认领超时释放、幂等键清理
-│   │   └── src/assets.rs      # rust-embed
-│   └── wtow-cli/
-│       ├── src/main.rs
-│       ├── src/cmd/           # raw.rs / exec.rs / auth.rs / skill.rs
-│       ├── src/config.rs      # 配置解析优先级
-│       └── skill/             # SKILL.md + references/*.md（include_str!）
-├── web/                       # React SPA
-│   ├── src/pages/
-│   ├── src/components/
-│   ├── src/api/               # openapi-typescript 生成
-│   └── vite.config.ts
-├── migrations/                # sqlx 迁移
-├── deploy/{Dockerfile,compose.yml}
+├── server/                    # ── Web 程序（独立构建）──
+│   ├── Cargo.toml
+│   ├── src/
+│   │   ├── main.rs
+│   │   ├── config.rs          # env / TOML 配置
+│   │   ├── app.rs             # Router 组装、中间件
+│   │   ├── auth/              # 会话、PAT、角色校验
+│   │   ├── project/           # 项目上下文提取器
+│   │   ├── api/               # raw / exec / files / stats / admin / release
+│   │   ├── domain/            # 状态迁移、认领、建联（纯函数 + 事务编排）
+│   │   ├── jobs/              # 认领超时释放、幂等键清理
+│   │   └── assets.rs          # rust-embed
+│   ├── web/                   # React SPA
+│   │   ├── src/pages/
+│   │   ├── src/components/
+│   │   ├── src/api/           # openapi-typescript 生成
+│   │   └── vite.config.ts
+│   ├── migrations/            # sqlx 迁移
+│   └── deploy/{Dockerfile,compose.yml}
+├── cli/                       # ── CLI（独立构建、独立版本号）──
+│   ├── Cargo.toml
+│   ├── src/{main.rs, cmd/, config.rs}
+│   └── skill/                 # SKILL.md + references/*.md（include_str!）
+├── contract/                  # 仅 wire 类型与错误码，无运行时依赖
+│   └── src/{dto.rs, error.rs}
+├── releases/                  # 构建产物（tar.gz + sha256），由 Web 下发
 └── docs/{PRD.md,DESIGN.md}
 ```
 
-`wtow-core` 只放不依赖数据库的类型与规则，保证 CLI 不需要拖入服务端依赖。
+- `cli/` 不依赖 `server/` 的任何代码，也不依赖 axum / sqlx；两者只共享 `contract/` 里的 serde DTO 与错误码常量。
+- `contract/` 刻意做成零依赖的小 crate，只是为了不让接口字段在两边各写一遍。若将来拆成两个仓库，它单独版本化发布，或改为从 OpenAPI 生成。
+- `server/` 与 `cli/` 可以分别设置 CI 流水线与发布节奏，Web 升级不强制 CLI 升级。
 
 ---
 
@@ -493,6 +498,7 @@ RETURNING id;
 | `POST` | `/projects/{slug}/files` | 全部 | 附件上传 |
 | `GET` | `/projects/{slug}/files/{id}` | 成员 | 下载（签名或鉴权流式返回） |
 | `GET` | `/projects/{slug}/stats` | 成员 | 管道水位 |
+| `GET` | `/meta` | 公开 | 服务端版本、`api_version`、`min_cli_version`，CLI 启动时校验 |
 
 ### 9.3 统一约定
 
@@ -500,7 +506,7 @@ RETURNING id;
 - 列表：`?page=1&page_size=20` → `{"items": [], "total": 0}`
 - 幂等：`POST` 支持 `Idempotency-Key`，24 小时内同 Key 返回首次结果
 - 并发：`PATCH` 支持 `If-Match: <version>`，冲突返回 `409 VERSION_CONFLICT`
-- 错误码常量集中在 `wtow-core::error`，CLI 与前端共用
+- 错误码常量集中在 `contract::error`，服务端、CLI 与前端共用同一份定义
 
 ---
 
@@ -530,6 +536,8 @@ RETURNING id;
 ---
 
 ## 11. CLI 设计
+
+CLI 是独立交付物：独立仓库目录、独立版本号、独立发布流水线，不依赖服务端代码。启动时请求 `GET /api/v1/meta` 校验 `min_cli_version`，版本过低直接报错并给出 `curl -fsSL <base>/install.sh | sh` 的升级提示。
 
 ### 11.1 配置解析优先级
 
@@ -631,7 +639,11 @@ Skill 文件用 `include_str!` 编进二进制，`wtow skill install` 写到 `~/
 
 ---
 
-## 16. 部署
+## 16. 部署与分发
+
+Web 与 CLI 是两条独立的发布链路，版本号互不绑定。
+
+### 16.1 Web 程序部署
 
 ```yaml
 # deploy/compose.yml（示意）
@@ -647,11 +659,45 @@ services:
       WTOW_DATABASE_URL: postgres://wtow:...@db/wtow
       WTOW_PUBLIC_BASE_URL: https://wtow.internal
       WTOW_ATTACHMENT_DIR: /data/attachments
+      WTOW_RELEASE_DIR: /data/releases      # CLI 产物目录，由 Web 只读下发
     volumes: [data:/data]
     ports: ["8080:8080"]
 ```
 
-多阶段构建：`node` 构建 `web/dist` → `rust` 编译服务端（`rust-embed` 打包前端）→ `debian-slim` 运行。CLI 单独发布预编译二进制（macOS arm64 / linux x86_64）。
+多阶段构建：`node` 构建 `web/dist` → `rust` 编译服务端（`rust-embed` 打包前端）→ `debian-slim` 运行。
+
+### 16.2 CLI 发布
+
+- 独立流水线，版本号独立（semver），与 Web 版本解耦。
+- 构建目标：`aarch64-apple-darwin`、`x86_64-apple-darwin`、`x86_64-unknown-linux-musl`、`aarch64-unknown-linux-musl`。
+- 产物：`wtow-v1.4.2-aarch64-apple-darwin.tar.gz` + 同名 `.sha256`，连同 `latest.json` 清单推送到 Web 的 `WTOW_RELEASE_DIR`，或由管理员手工上传。
+- 兼容性：服务端 `/api/v1/meta` 返回 `{ api_version, min_cli_version }`，CLI 启动时校验；低于下限时直接报错并提示升级命令，而不是带着旧协议半途失败。
+
+### 16.3 Web 提供 CLI 的下载与安装
+
+Web 是 CLI 的分发入口，但不参与 CLI 的运行。
+
+| 端点 | 说明 |
+| :--- | :--- |
+| `GET /download` | 下载页（前端路由），按 UA 推荐平台，展示一键命令 |
+| `GET /install.sh` | 安装脚本：检测 OS/ARCH → 下载对应产物 → 校验 sha256 → 落到 `~/.local/bin/wtow` |
+| `GET /dl/latest.json` | 版本清单：`{ version, min_cli_version, artifacts: [{ target, url, sha256 }] }` |
+| `GET /dl/{artifact}` | 产物下载，`Content-Disposition: attachment` |
+
+项目详情页直接生成该项目专用的接入命令，用户复制即可：
+
+```bash
+curl -fsSL https://wtow.internal/install.sh | sh
+
+wtow login --base-url https://wtow.internal \
+           --project finance-agent \
+           --token wtow_pat_xxx
+
+wtow skill install
+```
+
+- 下载与安装**不需要登录**，避免 Agent 前置依赖账号；令牌只在 `login` 时需要。
+- 安装脚本强制 HTTPS、校验 sha256，不允许 `latest` 之外的重定向域名。
 
 ---
 
@@ -684,12 +730,12 @@ services:
 
 | 阶段 | 内容 | 验收 |
 | :--- | :--- | :--- |
-| **D0** | workspace 骨架、项目/用户/成员/令牌、登录、静态资源内嵌 | 能创建项目并发令牌 |
+| **D0** | 两个独立项目骨架、项目/用户/成员/令牌、登录、静态资源内嵌 | 能创建项目并发令牌 |
 | **D1** | 原始作文提交/列表/详情/认领、附件上传 | 测试者在 Web 上能提交并看到 |
 | **D2** | 执行作文创建（拆/合）、关联表、双向追溯、分配工作台 | 分配者能完成一次完整拆解 |
-| **D3** | 执行管道、领取/完成、CLI 全量命令 | Agent 能通过 CLI 走完整闭环 |
-| **D4** | Skill 打包与安装、`related` 检索、统计页 | 分配者的本地 Agent 可独立完成去重拆分 |
-| **D5** | MCP 适配（可选）、SSE、指标 | 按需 |
+| **D3** | 执行管道、领取/完成、CLI 全量命令、CLI 发布流水线 | Agent 能通过 CLI 走完整闭环 |
+| **D4** | 下载页、`install.sh`、`latest.json`、`/meta` 版本校验、`wtow skill install` | 新机器一条命令装好 CLI 并接入项目 |
+| **D5** | `related` 检索、统计页、MCP 适配（可选）、SSE、指标 | 按需 |
 
 ---
 
@@ -703,3 +749,5 @@ services:
 | 4 | 是否需要跨项目视图（例如「我所项目」看板） | 一期只做项目列表，不做跨项目聚合 |
 | 5 | 检索是否需要中文分词（jieba/zhparser） | 一期 `pg_trgm` 足够，量大再评估 |
 | 6 | CLI 与 PRD 的命名统一：`wtow-cli` 还是 `wtow` | 二进制名用 `wtow`，crate 名 `wtow-cli` |
+| 7 | CLI 产物由 Web 自托管下发，还是走 GitHub Releases | 自托管，离线环境也能装；`latest.json` 格式与 GitHub Releases 兼容，将来可切换 |
+| 8 | 安装脚本要不要支持 Windows | 一期先 macOS / Linux，Windows 用户用 zip 手动安装 |
