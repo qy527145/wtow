@@ -4,32 +4,59 @@
 <meta charset="utf-8">
 <title>下载 wtow CLI</title>
 <style>
-body { font-family: -apple-system, sans-serif; max-width: 720px; margin: 48px auto; padding: 0 16px; color: #222; }
+body { font-family: -apple-system, sans-serif; max-width: 760px; margin: 48px auto; padding: 0 16px; color: #222; }
 pre { background: #f4f4f4; padding: 12px; border-radius: 6px; overflow-x: auto; }
+h2 { font-size: 17px; margin-top: 32px; }
 td, th { padding: 4px 12px 4px 0; text-align: left; }
+.note { color: #666; font-size: 13px; }
 </style>
 </head>
 <body>
 <h1>wtow CLI</h1>
-<p>一键安装（macOS / Linux）：</p>
+
+<h2>macOS / Linux</h2>
 <pre>curl -fsSL __WTOW_BASE_URL__/install.sh | sh</pre>
-<p>接入项目（令牌在项目设置页生成）：</p>
+<p class="note">二进制装到 <code>~/.local/bin/wtow</code>。可用 <code>WTOW_BIN_DIR</code> 改目录。</p>
+
+<h2>Windows（PowerShell）</h2>
+<pre>irm __WTOW_BASE_URL__/install.ps1 | iex</pre>
+<p class="note">装到 <code>%LOCALAPPDATA%\wtow\bin</code> 并自动加入用户 PATH。</p>
+
+<h2>接入项目</h2>
+<p>令牌在项目设置页生成：</p>
 <pre>wtow login --base-url __WTOW_BASE_URL__ --project &lt;slug&gt; --token &lt;token&gt;
 wtow skill install</pre>
+
 <h2>手动下载</h2>
 <p id="ver">加载中…</p>
 <table id="list"></table>
+
 <script>
+const LABEL = {
+  'aarch64-apple-darwin': 'macOS Apple Silicon (M 系列)',
+  'x86_64-apple-darwin': 'macOS Intel',
+  'x86_64-unknown-linux-musl': 'Linux x86_64',
+  'aarch64-unknown-linux-musl': 'Linux arm64',
+  'x86_64-pc-windows-msvc': 'Windows x86_64',
+};
 fetch('/dl/latest.json').then(r => r.json()).then(m => {
   document.getElementById('ver').textContent = '最新版本 ' + m.version;
   const t = document.getElementById('list');
+  const head = t.insertRow();
+  for (const h of ['平台', '下载', 'sha256']) {
+    const th = document.createElement('th');
+    th.textContent = h;
+    head.appendChild(th);
+  }
   for (const a of m.artifacts) {
     const tr = t.insertRow();
     const link = document.createElement('a');
     link.href = a.url;
-    link.textContent = a.target;
+    link.textContent = a.url.split('/').pop();
+    const name = tr.insertCell();
+    name.textContent = LABEL[a.target] || a.target;
     tr.insertCell().appendChild(link);
-    tr.insertCell().textContent = a.sha256;
+    tr.insertCell().innerHTML = '<code>' + a.sha256 + '</code>';
   }
 }).catch(() => { document.getElementById('ver').textContent = '暂无发布'; });
 </script>

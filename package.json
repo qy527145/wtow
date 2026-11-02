@@ -18,6 +18,7 @@
     "cli": "cargo run -q -p wtow-cli --",
     "skill:install": "cargo run -q -p wtow-cli -- skill install",
     "release": "bun scripts/release.ts",
+    "deploy": "bun scripts/deploy.ts",
     "smoke": "bun scripts/with-env.ts bun scripts/smoke.ts"
   }
 }

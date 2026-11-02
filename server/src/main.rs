@@ -78,6 +78,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .nest("/api/v1", api)
         .route("/healthz", get(|| async { "ok" }))
         .route("/install.sh", get(routes::dist::install_sh))
+        .route("/install.ps1", get(routes::dist::install_ps1))
         .route("/download", get(routes::dist::download_page))
         .route("/dl/{artifact}", get(routes::dist::artifact))
         .fallback(assets::spa)

@@ -7,6 +7,7 @@ use axum::response::{Html, IntoResponse};
 use crate::error::{AppError, AppResult};
 
 const INSTALL_SH: &str = include_str!("../../assets/install.sh");
+const INSTALL_PS1: &str = include_str!("../../assets/install.ps1");
 const DOWNLOAD_HTML: &str = include_str!("../../assets/download.html");
 
 fn release_dir() -> PathBuf {
@@ -25,6 +26,11 @@ pub async fn install_sh() -> impl IntoResponse {
         .replace("__WTOW_BASE_URL__", &public_base_url())
         .replace("__WTOW_MINISIGN_PUBKEY__", &std::env::var("WTOW_MINISIGN_PUBKEY").unwrap_or_default());
     ([(header::CONTENT_TYPE, "text/x-shellscript; charset=utf-8")], body)
+}
+
+pub async fn install_ps1() -> impl IntoResponse {
+    let body = INSTALL_PS1.replace("__WTOW_BASE_URL__", &public_base_url());
+    ([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], body)
 }
 
 pub async fn download_page() -> Html<String> {

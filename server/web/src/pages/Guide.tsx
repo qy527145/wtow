@@ -5,7 +5,7 @@ import { Bot, Check, Code2, FolderPlus, Inbox, Shuffle, Terminal } from 'lucide-
 import { api } from '../api/client'
 import type { CreatedToken, Project, Role } from '../api/types'
 import { PageHeader } from '../components/Shell'
-import { Button, CopyField, Select } from '../components/ui'
+import { Button, CopyField, Segmented, Select } from '../components/ui'
 import { cn } from '../lib/cn'
 import { hasRole, ROLE_LABEL } from '../lib/format'
 import { CreateTokenDialog } from './Settings'
@@ -37,6 +37,10 @@ export function GuidePage() {
   const [creatingToken, setCreatingToken] = useState(false)
   const [step, setStep] = useState<StepKey>('install')
   const [done, setDone] = useState<Set<StepKey>>(() => new Set(JSON.parse(localStorage.getItem(DONE_KEY) ?? '[]')))
+  // 默认按当前系统选好安装命令，省得用户自己切。
+  const [platform, setPlatform] = useState<'unix' | 'windows'>(() =>
+    /Win/i.test(navigator.userAgent) ? 'windows' : 'unix',
+  )
   const origin = location.origin
 
   useEffect(() => localStorage.setItem(DONE_KEY, JSON.stringify([...done])), [done])
@@ -98,18 +102,40 @@ export function GuidePage() {
               <StepCard
                 icon={<Terminal className="size-5" />}
                 title="安装 wtow CLI"
-                lead="macOS 和 Linux 都可以用这一行安装，二进制会放到 ~/.local/bin。"
+                lead="按你的系统选一条命令。macOS 与 Linux 装到 ~/.local/bin，Windows 装到 %LOCALAPPDATA%\wtow\bin。"
                 onNext={() => complete('install')}
               >
-                <CopyField value={`curl -fsSL ${origin}/install.sh | sh`} />
+                <div className="flex flex-col gap-3">
+                  <Segmented
+                    value={platform}
+                    onChange={setPlatform}
+                    options={[
+                      { value: 'unix', label: 'macOS / Linux' },
+                      { value: 'windows', label: 'Windows' },
+                    ]}
+                  />
+                  <CopyField
+                    value={
+                      platform === 'unix'
+                        ? `curl -fsSL ${origin}/install.sh | sh`
+                        : `irm ${origin}/install.ps1 | iex`
+                    }
+                  />
+                </div>
                 <Checklist
                   items={[
                     <>
                       装完运行 <code>wtow --version</code>，能看到版本号就成功了。
                     </>,
-                    <>
-                      如果提示找不到命令，把 <code>~/.local/bin</code> 加进 PATH。
-                    </>,
+                    platform === 'unix' ? (
+                      <>
+                        如果提示找不到命令，把 <code>~/.local/bin</code> 加进 PATH。
+                      </>
+                    ) : (
+                      <>
+                        Windows 脚本会把安装目录写进用户 PATH，重开一个终端即可。
+                      </>
+                    ),
                     <>
                       也可以去 <a className="text-pencil hover:underline" href="/download">下载页</a> 手动下载对应平台的二进制。
                     </>,

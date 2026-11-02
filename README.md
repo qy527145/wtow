@@ -56,7 +56,8 @@ bun run smoke
 | `bun run build` / `build:release` | 构建前端并编译整个 workspace |
 | `bun run cli -- <args>` | 用源码运行 CLI，例如 `bun run cli -- raw list --json` |
 | `bun run skill:install` | 把 Skill 安装到 `~/.claude/skills/wtow/` |
-| `bun run release` | 打包 CLI 并更新 `latest.json`，供 `install.sh` 下发 |
+| `bun run release` | 交叉编译 5 个平台的 CLI 并更新 `latest.json` |
+| `bun run deploy` | 一键部署到服务器（见「部署」） |
 | `bun run smoke` | 对运行中的服务做端到端冒烟测试 |
 
 ## 配置（`.env`）
@@ -102,21 +103,45 @@ CLI 读取配置的优先级：命令行参数 > 环境变量（`WTOW_BASE_URL` 
 ## 发布 CLI
 
 ```bash
-bun run release                                        # 当前主机架构
-bun run release --target x86_64-unknown-linux-musl     # 交叉编译（需先 rustup target add）
+bun run release                                        # 交叉编译全部 5 个平台
+bun run release --target x86_64-unknown-linux-musl     # 只打一个平台
 ```
 
-脚本会以 release 模式编译 `wtow-cli`，把二进制改名并打成 `wtow-v<ver>-<target>.tar.gz` 放进 `WTOW_RELEASE_DIR`（默认 `./data/releases`），同时生成 `.sha256` 并更新 `latest.json`：同一目录里其它架构的条目会保留，`version` 取自 `cli/Cargo.toml`，`min_cli_version` 取自服务端 `/meta` 的常量，无需手改。打包内容固定 mtime 与属主，同一二进制重复打包得到的 sha256 相同。
+目标平台：macOS（Apple Silicon / Intel）、Linux（x86_64 / arm64，musl 静态链接）、Windows x86_64。Linux 用 `cargo-zigbuild`，Windows 用 `cargo-xwin`，需要先 `rustup target add` 对应 target。产物打成 `wtow-v<ver>-<target>.tar.gz`（Windows 为 `.zip`）放进 `WTOW_RELEASE_DIR`（默认 `./data/releases`），同时生成 `.sha256` 并更新 `latest.json`：同一目录里其它平台的条目会保留，`version` 取自 `cli/Cargo.toml`，`min_cli_version` 取自服务端 `/meta` 的常量，无需手改。打包内容固定 mtime 与属主，同一二进制重复打包得到的 sha256 相同。产物 URL 的前缀取自 `deploy/.env` 的 `WTOW_PUBLIC_BASE_URL`，可用 `--base-url` 覆盖。
 
 设置 `WTOW_MINISIGN_SECRET_KEY` 指向私钥后，脚本会顺带签名 `latest.json`；服务端配置 `WTOW_MINISIGN_PUBKEY` 后，`install.sh` 会强制校验签名（未配置时只校验 sha256 并发警告）。
 
-用户随后用下面一条命令安装：
+用户随后按平台用一条命令安装：
 
 ```bash
-curl -fsSL <base>/install.sh | sh
+curl -fsSL <base>/install.sh | sh        # macOS / Linux，装到 ~/.local/bin
+irm <base>/install.ps1 | iex             # Windows PowerShell，装到 %LOCALAPPDATA%\wtow\bin 并加入 PATH
 ```
 
-`latest.json` 中每个 artifact 必须单独占一行，格式为 `{ "target": ..., "url": ..., "sha256": ... }`，`url` 必须与 `WTOW_PUBLIC_BASE_URL` 同源——脚本按此格式生成，手工维护时不要压缩成一行。下载页在 `/download`。
+安装脚本默认要求 HTTPS；服务端自己声明的 `WTOW_PUBLIC_BASE_URL` 是 http 时也放行（部署方已选择不上 TLS），其它 http 地址需显式设 `WTOW_ALLOW_HTTP=1`。
+
+`latest.json` 中每个 artifact 必须单独占一行，格式为 `{ "target": ..., "url": ..., "sha256": ... }`——脚本按此格式生成，手工维护时不要压缩成一行。下载页在 `/download`。
+
+## 部署
+
+```bash
+cp deploy/.env.example deploy/.env       # 第一次执行，填 ssh 别名和对外地址
+bun run deploy                           # 构建前端 → 交叉编译服务端 → 打包 CLI → 上传 → 重启容器 → 健康检查
+bun run deploy --skip-cli                # 只改了服务端时，跳过 CLI 打包
+bun run deploy --skip-build              # 复用上次编译的服务端二进制
+```
+
+服务器上不需要 Rust：服务端在本地编译成 `x86_64-unknown-linux-musl` 静态二进制，和 `deploy/Dockerfile` 一起传上去，基于 alpine 打一个很小的镜像；Postgres 默认用服务器上已有的 `postgres:17`，缺失时走 `docker.1ms.run` 镜像源。服务器目录（默认 `/opt/wtow`）：
+
+| 路径 | 说明 |
+| :--- | :--- |
+| `.env` | 生产配置。首次部署自动生成随机数据库密码，之后不会被覆盖，改配置直接在服务器上编辑 |
+| `compose.yml` | 容器编排，每次部署覆盖 |
+| `image/`、`image.prev/` | 当前与上一版的镜像构建上下文，回滚时把 `image.prev` 换回来再 `docker compose up -d --build` |
+| `data/attachments` | 附件，生产数据，部署不会删除 |
+| `data/releases` | CLI 产物，每次部署以本地为准同步 |
+
+数据库数据在 docker volume `wtow_pgdata`。常用排查命令部署结束时会打印出来。
 
 ## 尚未实现
 
