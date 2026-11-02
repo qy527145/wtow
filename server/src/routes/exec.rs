@@ -71,7 +71,7 @@ pub async fn load(st: &AppState, ctx: &ProjectCtx, id: &str) -> AppResult<ExecCo
     .await?
     .ok_or_else(|| AppError::not_found(format!("exec {id}")))?;
     let mut exec = exec_from_row(&row);
-    // 详情一次带全图文上下文：自身附件 + 来源原始作文的附件，列表接口不带。
+    // 详情一次带全图文上下文：自身附件 + 来源原始作文的附件；列表接口只带自身附件。
     exec.attachments = files::list_owned(st, ctx.project_id, "exec", &[exec.id.clone()]).await?;
     exec.attachments.extend(files::list_owned(st, ctx.project_id, "raw", &exec.source_raw_ids).await?);
     Ok(exec)
@@ -245,7 +245,15 @@ pub async fn list(
     .bind((page - 1) * size)
     .fetch_all(&st.db)
     .await?;
-    Ok(Json(Page { items: rows.iter().map(exec_from_row).collect(), total }))
+    let mut items: Vec<ExecComposition> = rows.iter().map(exec_from_row).collect();
+    // 列表只带自身附件，供看板显示「有图」；来源附件留给详情。
+    let ids: Vec<String> = items.iter().map(|e| e.id.clone()).collect();
+    for a in files::list_owned(&st, ctx.project_id, "exec", &ids).await? {
+        if let Some(e) = items.iter_mut().find(|e| Some(&e.id) == a.owner_id.as_ref()) {
+            e.attachments.push(a);
+        }
+    }
+    Ok(Json(Page { items, total }))
 }
 
 pub async fn get(

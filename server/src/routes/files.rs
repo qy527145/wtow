@@ -81,10 +81,19 @@ pub async fn upload(
     Ok((StatusCode::CREATED, Json(Attachment { id, filename, mime: mime.into(), size_bytes: data.len() as i64, owner_id: None })))
 }
 
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct DownloadQuery {
+    #[serde(default)]
+    pub download: bool,
+}
+
+/// 图片默认 inline，Web 端正文可以直接显示；`?download=1` 强制下载。
+/// 允许上传的类型里没有 HTML / SVG，配合 nosniff，inline 不会执行脚本。
 pub async fn download(
     State(st): State<AppState>,
     ctx: ProjectCtx,
     Path((_, id)): Path<(String, String)>,
+    axum::extract::Query(q): axum::extract::Query<DownloadQuery>,
 ) -> AppResult<impl IntoResponse> {
     let row = sqlx::query("SELECT filename, mime, storage_key FROM attachments WHERE project_id = $1 AND id = $2")
         .bind(ctx.project_id)
@@ -96,11 +105,14 @@ pub async fn download(
     let data = tokio::fs::read(root().join(key)).await.map_err(|_| AppError::not_found(format!("file {id}")))?;
     let filename: String = row.get("filename");
     let safe: String = filename.chars().filter(|c| c.is_ascii_graphic() && *c != '"' || *c == ' ').collect();
+    let mime: String = row.get("mime");
+    let disposition = if mime.starts_with("image/") && !q.download { "inline" } else { "attachment" };
     Ok((
         [
-            (header::CONTENT_TYPE, row.get::<String, _>("mime")),
-            (header::CONTENT_DISPOSITION, format!("attachment; filename=\"{safe}\"")),
+            (header::CONTENT_TYPE, mime),
+            (header::CONTENT_DISPOSITION, format!("{disposition}; filename=\"{safe}\"")),
             (header::X_CONTENT_TYPE_OPTIONS, "nosniff".to_string()),
+            (header::CACHE_CONTROL, "private, max-age=3600".to_string()),
         ],
         data,
     ))

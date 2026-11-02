@@ -217,7 +217,15 @@ pub async fn list(
     .bind((page - 1) * size)
     .fetch_all(&st.db)
     .await?;
-    Ok(Json(Page { items: rows.iter().map(raw_from_row).collect(), total }))
+    let mut items: Vec<RawComposition> = rows.iter().map(raw_from_row).collect();
+    // 一次查出整页的附件，看板卡片据此显示「有图」。
+    let ids: Vec<String> = items.iter().map(|r| r.id.clone()).collect();
+    for a in files::list_owned(&st, ctx.project_id, "raw", &ids).await? {
+        if let Some(r) = items.iter_mut().find(|r| Some(&r.id) == a.owner_id.as_ref()) {
+            r.attachments.push(a);
+        }
+    }
+    Ok(Json(Page { items, total }))
 }
 
 fn escape_like(s: &str) -> String {
