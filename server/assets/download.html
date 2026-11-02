@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>下载 wtow CLI</title>
+<style>
+body { font-family: -apple-system, sans-serif; max-width: 720px; margin: 48px auto; padding: 0 16px; color: #222; }
+pre { background: #f4f4f4; padding: 12px; border-radius: 6px; overflow-x: auto; }
+td, th { padding: 4px 12px 4px 0; text-align: left; }
+</style>
+</head>
+<body>
+<h1>wtow CLI</h1>
+<p>一键安装（macOS / Linux）：</p>
+<pre>curl -fsSL __WTOW_BASE_URL__/install.sh | sh</pre>
+<p>接入项目（令牌在项目设置页生成）：</p>
+<pre>wtow login --base-url __WTOW_BASE_URL__ --project &lt;slug&gt; --token &lt;token&gt;
+wtow skill install</pre>
+<h2>手动下载</h2>
+<p id="ver">加载中…</p>
+<table id="list"></table>
+<script>
+fetch('/dl/latest.json').then(r => r.json()).then(m => {
+  document.getElementById('ver').textContent = '最新版本 ' + m.version;
+  const t = document.getElementById('list');
+  for (const a of m.artifacts) {
+    const tr = t.insertRow();
+    const link = document.createElement('a');
+    link.href = a.url;
+    link.textContent = a.target;
+    tr.insertCell().appendChild(link);
+    tr.insertCell().textContent = a.sha256;
+  }
+}).catch(() => { document.getElementById('ver').textContent = '暂无发布'; });
+</script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+/target/
+**/*.rs.bk
+
+.env
+.env.*
+!.env.example
+
+*.db
+*.sqlite
+*.sqlite3
+
+.DS_Store
+.idea/
+.vscode/
+
+node_modules/
+/data/

@@ -1,0 +1,23 @@
+{
+  "name": "wtow",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "db:up": "bun scripts/db.ts up",
+    "db:down": "bun scripts/db.ts down",
+    "db:reset": "bun scripts/db.ts reset",
+    "db:psql": "docker exec -it wtow-pg psql -U wtow -d wtow",
+    "web:install": "cd server/web && bun install",
+    "web:dev": "cd server/web && bun run dev",
+    "web:build": "cd server/web && bun run build",
+    "build": "bun run web:build && cargo build --workspace",
+    "build:release": "bun run web:build && cargo build --workspace --release",
+    "check": "cargo build --workspace",
+    "dev": "bun run db:up && bun scripts/with-env.ts cargo run -p wtow-server",
+    "server": "bun scripts/with-env.ts cargo run -p wtow-server",
+    "cli": "cargo run -q -p wtow-cli --",
+    "skill:install": "cargo run -q -p wtow-cli -- skill install",
+    "release": "bun scripts/release.ts",
+    "smoke": "bun scripts/with-env.ts bun scripts/smoke.ts"
+  }
+}
