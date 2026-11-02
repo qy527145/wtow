@@ -7,7 +7,7 @@
 ```
 contract/   服务端与 CLI 共用的 DTO 和错误码
 server/     HTTP 服务、数据库迁移（server/migrations）、安装脚本与下载页（server/assets）
-server/web/ Web 管理台（React + Vite），构建产物 web/dist 由 rust-embed 打进服务端二进制
+server/web/ Web 管理台（React 19 + Vite + Tailwind CSS 4 + Radix UI），构建产物 web/dist 由 rust-embed 打进服务端二进制
 cli/        wtow 命令行，Skill 文件在 cli/skill 下，编译时打进二进制
 scripts/    bun 脚本：数据库管理、.env 透传、冒烟测试
 ```
@@ -120,4 +120,4 @@ curl -fsSL <base>/install.sh | sh
 
 ## 尚未实现
 
-`/stats`、Web 端附件上传、附件签名 URL 与 S3 存储、未绑定附件的清理任务，以及自动化测试。
+`/stats`、附件签名 URL 与 S3 存储、未绑定附件的清理任务，以及自动化测试。

@@ -1,4 +1,5 @@
 import type {
+  Attachment,
   CreatedToken,
   ErrorBody,
   ExecComposition,
@@ -98,8 +99,23 @@ export const api = {
   raws: (slug: string, q: { status?: RawStatus; mine?: boolean; q?: string; tag?: string; page?: number; page_size?: number }) =>
     request<Page<RawComposition>>('GET', `${p(slug)}/raw`, undefined, q),
   raw: (slug: string, id: string) => request<RawComposition>('GET', `${p(slug)}/raw/${id}`),
-  submitRaw: (slug: string, title: string, description: string, tags: string[]) =>
-    request<RawComposition>('POST', `${p(slug)}/raw`, { title, description, tags }),
+  submitRaw: (slug: string, title: string, description: string, tags: string[], attachment_ids: string[] = []) =>
+    request<RawComposition>('POST', `${p(slug)}/raw`, { title, description, tags, attachment_ids }),
+  uploadFile: async (slug: string, file: File): Promise<Attachment> => {
+    const fd = new FormData()
+    fd.append('file', file, file.name)
+    const res = await fetch(`${BASE}${p(slug)}/files`, {
+      method: 'POST',
+      headers: { 'x-requested-with': 'wtow-web' },
+      credentials: 'same-origin',
+      body: fd,
+    })
+    const data = await res.json().catch(() => undefined)
+    if (!res.ok) {
+      throw new ApiError(res.status, data?.error ?? { code: 'HTTP_' + res.status, message: res.statusText, details: null })
+    }
+    return data as Attachment
+  },
   rawExecs: (slug: string, id: string) => request<ExecComposition[]>('GET', `${p(slug)}/raw/${id}/execs`),
   related: (slug: string, id: string) => request<RelatedItem[]>('GET', `${p(slug)}/raw/${id}/related`),
   claimRaw: (slug: string, id: string) => request<RawComposition>('POST', `${p(slug)}/raw/${id}/claim`),
@@ -119,7 +135,14 @@ export const api = {
   execRaws: (slug: string, id: string) => request<RawComposition[]>('GET', `${p(slug)}/exec/${id}/raws`),
   createExec: (
     slug: string,
-    req: { source_raw_ids: string[]; instruction: string; target_resources: string[]; priority: number; close_sources: boolean },
+    req: {
+      source_raw_ids: string[]
+      instruction: string
+      target_resources: string[]
+      priority: number
+      close_sources: boolean
+      attachment_ids?: string[]
+    },
   ) => request<ExecComposition>('POST', `${p(slug)}/exec`, req),
   claimExec: (slug: string, id: string, force = false) =>
     request<ExecComposition>('POST', `${p(slug)}/exec/${id}/claim`, undefined, { force: force || undefined }),
