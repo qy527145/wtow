@@ -286,7 +286,7 @@ ID 采用「前缀 + 序号」的可读形式：`RAW-1042`、`EXEC-2011`。
 wtow login --base-url <url> --project <slug> --token <token>
 wtow whoami --json                       # 返回 {id, project, roles, actor_type, read_only}
 wtow profile list|use <name>
-wtow skill install [--scope user|project]
+wtow skill install [--scope user|project] [--dir <skills目录>]
 
 # 测试端
 wtow raw submit --title="[标题]" --desc="[描述]" --tag finance --attach="[路径]"
@@ -363,7 +363,7 @@ wtow-skill/
     └── cli.md            # 完整命令与退出码
 ```
 
-随 CLI 一起分发，`wtow skill install` 拷贝到 `~/.claude/skills/wtow/`（`--scope project` 则装到项目内）。
+随 CLI 一起分发，`wtow skill install` 拷贝到 `~/.claude/skills/wtow/`（`--scope project` 则装到项目内；其他客户端用 `--dir ~/.carter/skills` 之类指定 skills 目录，装到 `<dir>/wtow/`）。
 
 ### 6.3 SKILL.md
 

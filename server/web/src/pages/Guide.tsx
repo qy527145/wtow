@@ -1,11 +1,11 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
 import { Bot, Check, Code2, FolderPlus, Inbox, Shuffle, Terminal } from 'lucide-react'
 import { api } from '../api/client'
 import type { CreatedToken, Project, Role } from '../api/types'
 import { PageHeader } from '../components/Shell'
-import { Button, CopyField, Segmented, Select } from '../components/ui'
+import { Button, CopyButton, CopyField, Segmented, Select } from '../components/ui'
 import { cn } from '../lib/cn'
 import { hasRole, ROLE_LABEL } from '../lib/format'
 import { CreateTokenDialog } from './Settings'
@@ -21,6 +21,15 @@ const STEPS: { key: StepKey; title: string; sub: string }[] = [
 ]
 
 const DONE_KEY = 'wtow:guide-done'
+
+type SkillClient = 'claude' | 'carter' | 'sdw'
+
+/** 各 Agent 客户端的 skills 目录；Claude Code 是 CLI 默认值，不用传 --dir。 */
+const SKILL_CLIENTS: { key: SkillClient; label: string; path: string; cmd: string }[] = [
+  { key: 'claude', label: 'Claude Code', path: '~/.claude/skills/wtow/', cmd: 'wtow skill install' },
+  { key: 'carter', label: 'Carter', path: '~/.carter/skills/wtow/', cmd: 'wtow skill install --dir ~/.carter/skills' },
+  { key: 'sdw', label: 'SDW', path: '~/.sdw/skills/wtow/', cmd: 'wtow skill install --dir ~/.sdw/skills' },
+]
 
 /**
  * 首次接入引导：安装 CLI → 生成令牌 → 登录 → 安装 Skill → 按角色上手。
@@ -41,6 +50,8 @@ export function GuidePage() {
   const [platform, setPlatform] = useState<'unix' | 'windows'>(() =>
     /Win/i.test(navigator.userAgent) ? 'windows' : 'unix',
   )
+  const [client, setClient] = useState<SkillClient>('claude')
+  const skillClient = SKILL_CLIENTS.find((c) => c.key === client)!
   const origin = location.origin
 
   useEffect(() => localStorage.setItem(DONE_KEY, JSON.stringify([...done])), [done])
@@ -243,17 +254,28 @@ export function GuidePage() {
               <StepCard
                 icon={<Bot className="size-5" />}
                 title="安装 Agent Skill"
-                lead="Skill 告诉 Claude Code 什么时候、怎样调用 wtow：提交反馈、拆分任务、领取并交付。"
+                lead="Skill 告诉 Agent 什么时候、怎样调用 wtow：提交反馈、拆分任务、领取并交付。按你用的客户端选一条。"
                 onNext={() => complete('skill')}
               >
-                <CopyField value="wtow skill install" />
+                <div className="flex flex-col gap-3">
+                  <Segmented value={client} onChange={setClient} options={SKILL_CLIENTS.map((c) => ({ value: c.key, label: c.label }))} />
+                  <CopyField value={skillClient.cmd} />
+                  <p className="text-xs text-graphite">
+                    装到 <code>{skillClient.path}</code>，本机所有项目里的 Agent 都能用。
+                  </p>
+                </div>
                 <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                  <ScopeCard title="装给自己（默认）" path="~/.claude/skills/wtow/" desc="你本机所有项目里的 Agent 都能用。" />
                   <ScopeCard
                     title="装进当前仓库"
                     path="./.claude/skills/wtow/"
                     desc="随仓库提交，团队成员拉代码就有。"
                     cmd="wtow skill install --scope project"
+                  />
+                  <ScopeCard
+                    title="装到任意目录"
+                    path="<目录>/wtow/"
+                    desc="其他客户端：传它的 skills 目录，会在下面建 wtow/。"
+                    cmd="wtow skill install --dir <目录>"
                   />
                 </div>
               </StepCard>
@@ -337,11 +359,15 @@ function Checklist({ items }: { items: ReactNode[] }) {
 
 function ScopeCard({ title, path, desc, cmd }: { title: string; path: string; desc: string; cmd?: string }) {
   return (
-    <div className="rounded-md border border-rule p-4">
+    <div className="min-w-0 rounded-md border border-rule p-4">
       <div className="text-[13px] font-medium">{title}</div>
       <div className="mt-1 font-mono text-xs text-pencil">{path}</div>
       <div className="mt-1.5 text-xs leading-relaxed text-graphite">{desc}</div>
-      {cmd && <div className="mt-2.5 font-mono text-[11.5px] text-graphite">{cmd}</div>}
+      {cmd && (
+        <div className="mt-3">
+          <CopyField value={cmd} />
+        </div>
+      )}
     </div>
   )
 }
@@ -377,6 +403,7 @@ function RoleTips({ project }: { project: Project | null }) {
   const tips = project ? TIPS.filter((t) => hasRole(project.my_roles, t.role)) : TIPS
   const [active, setActive] = useState(tips[0]?.role)
   const tip = tips.find((t) => t.role === active) ?? tips[0]
+  const say = useRef<HTMLParagraphElement>(null)
   if (!tip) return null
   return (
     <div>
@@ -403,7 +430,15 @@ function RoleTips({ project }: { project: Project | null }) {
             <Bot className="size-3.5" />
             对 Agent 说
           </div>
-          <div className="relative rounded-lg rounded-tl-sm bg-pencil-wash px-4 py-3 text-[14px] leading-relaxed text-pencil-deep">{tip.say}</div>
+          <div className="relative flex items-start gap-3 rounded-lg rounded-tl-sm bg-pencil-wash py-3 pr-2 pl-4">
+            <p
+              ref={say}
+              className="min-w-0 flex-1 text-[14px] leading-relaxed text-pencil-deep selection:bg-pencil selection:text-white"
+            >
+              {tip.say}
+            </p>
+            <CopyButton value={tip.say} tone="light" fallbackTarget={() => say.current} className="-my-0.5" />
+          </div>
           <p className="mt-4 text-[13px] leading-relaxed text-graphite">
             <span className="text-ink">在网页上：</span>
             {tip.web}

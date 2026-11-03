@@ -4,7 +4,7 @@
 wtow login --base-url <url> --project <slug> --token <token> [--profile <name>]
 wtow whoami
 wtow profile list | use <name>
-wtow skill install [--scope user|project]
+wtow skill install [--scope user|project] [--dir <skills目录>]
 
 wtow raw submit --title T --desc D [--tag X]... [--attach FILE]...
 wtow raw list [--status S] [--tag X] [--q KW] [--mine] [--page N] [--page-size N]

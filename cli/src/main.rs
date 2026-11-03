@@ -91,6 +91,9 @@ enum SkillCmd {
     Install {
         #[arg(long, default_value = "user", value_parser = ["user", "project"])]
         scope: String,
+        /// 自定义 skills 目录（如 ~/.carter/skills），装到 <dir>/wtow；给了就忽略 --scope
+        #[arg(long)]
+        dir: Option<PathBuf>,
     },
 }
 
@@ -566,7 +569,7 @@ fn main() {
     match &cli.cmd {
         Cmd::Login { profile } => login(g, profile.clone()),
         Cmd::Profile { cmd } => profile_cmd(g, cmd),
-        Cmd::Skill { cmd: SkillCmd::Install { scope } } => skill_install(g, scope),
+        Cmd::Skill { cmd: SkillCmd::Install { scope, dir } } => skill_install(g, scope, dir.as_deref()),
         Cmd::Whoami => {
             let api = Api::new(resolve(g), g);
             print(&api.get("/whoami", &[]), g.json);
@@ -638,13 +641,17 @@ fn profile_cmd(g: &Global, cmd: &ProfileCmd) {
     }
 }
 
-fn skill_install(g: &Global, scope: &str) {
-    let root = if scope == "project" {
-        PathBuf::from(".claude/skills/wtow")
-    } else {
-        dirs::home_dir()
-            .unwrap_or_else(|| fail(1, g.json, "CONFIG", "cannot locate home directory"))
-            .join(".claude/skills/wtow")
+fn skill_install(g: &Global, scope: &str, dir: Option<&Path>) {
+    let home = || dirs::home_dir().unwrap_or_else(|| fail(1, g.json, "CONFIG", "cannot locate home directory"));
+    let root = match dir {
+        // 引号包住或 PowerShell 下 `~` 不会被 shell 展开，这里补上。
+        Some(d) => match d.strip_prefix("~") {
+            Ok(rest) => home().join(rest),
+            Err(_) => d.to_path_buf(),
+        }
+        .join("wtow"),
+        None if scope == "project" => PathBuf::from(".claude/skills/wtow"),
+        None => home().join(".claude/skills/wtow"),
     };
     for (rel, content) in SKILL_FILES {
         let p = root.join(rel);

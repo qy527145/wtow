@@ -1,4 +1,4 @@
-import { cloneElement, forwardRef, isValidElement, useId, useState, type ButtonHTMLAttributes, type ReactElement, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react'
+import { cloneElement, forwardRef, isValidElement, useId, useRef, useState, type ButtonHTMLAttributes, type ReactElement, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react'
 import { Dialog as RDialog, Tooltip as RTooltip, DropdownMenu as RMenu } from 'radix-ui'
 import { Check, ChevronDown, Copy, Loader2, X } from 'lucide-react'
 import { cn } from '../lib/cn'
@@ -354,33 +354,95 @@ export const Menu = {
 
 /* ---------- 小件 ---------- */
 
+/**
+ * 写剪贴板。navigator.clipboard 只在安全上下文（HTTPS / localhost）存在，
+ * 用 http://<内网 IP> 部署时它是 undefined，所以退回 execCommand('copy')。
+ */
+export async function copyText(text: string): Promise<boolean> {
+  if (window.isSecureContext && navigator.clipboard) {
+    try {
+      await navigator.clipboard.writeText(text)
+      return true
+    } catch {
+      /* 权限被拒等情况，继续走兜底 */
+    }
+  }
+  const ta = document.createElement('textarea')
+  ta.value = text
+  ta.setAttribute('readonly', '')
+  ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;pointer-events:none'
+  document.body.appendChild(ta)
+  ta.select()
+  let ok = false
+  try {
+    ok = document.execCommand('copy')
+  } catch {
+    ok = false
+  }
+  ta.remove()
+  return ok
+}
+
+/** 选中元素内全部文字，复制失败时让用户能直接 ⌘C。 */
+function selectContents(el: HTMLElement | null) {
+  if (!el) return
+  const range = document.createRange()
+  range.selectNodeContents(el)
+  const sel = window.getSelection()
+  sel?.removeAllRanges()
+  sel?.addRange(range)
+}
+
+export function CopyButton({
+  value,
+  tone = 'dark',
+  className,
+  fallbackTarget,
+}: {
+  value: string
+  tone?: 'dark' | 'light'
+  className?: string
+  /** 复制失败时选中这个元素的文字 */
+  fallbackTarget?: () => HTMLElement | null
+}) {
+  const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle')
+  return (
+    <button
+      type="button"
+      onClick={async () => {
+        const ok = await copyText(value)
+        if (!ok) selectContents(fallbackTarget?.() ?? null)
+        setState(ok ? 'copied' : 'failed')
+        setTimeout(() => setState('idle'), ok ? 1400 : 2400)
+      }}
+      className={cn(
+        'inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[5px] px-2 text-xs transition-colors',
+        tone === 'dark' ? 'bg-white/10 text-white/85 hover:bg-white/20' : 'bg-surface/70 text-pencil-deep hover:bg-surface',
+        className,
+      )}
+    >
+      {state === 'copied' ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+      {state === 'copied' ? '已复制' : state === 'failed' ? '已选中，按 ⌘C' : '复制'}
+    </button>
+  )
+}
+
 export function CopyField({ value, label, multiline }: { value: string; label?: ReactNode; multiline?: boolean }) {
-  const [copied, setCopied] = useState(false)
+  const pre = useRef<HTMLPreElement>(null)
   return (
     <div className="group">
       {label && <div className="mb-1.5 text-xs text-graphite">{label}</div>}
       <div className="relative rounded-md bg-ink text-[#e7eaf0]">
         <pre
+          ref={pre}
           className={cn(
-            'scrollbar-quiet overflow-x-auto px-3.5 py-2.5 pr-20 font-mono text-[12.5px] leading-relaxed',
+            'scrollbar-quiet overflow-x-auto px-3.5 py-2.5 pr-24 font-mono text-[12.5px] leading-relaxed selection:bg-pencil selection:text-white',
             multiline ? 'whitespace-pre-wrap' : 'whitespace-pre',
           )}
         >
           {value}
         </pre>
-        <button
-          type="button"
-          onClick={() =>
-            navigator.clipboard?.writeText(value).then(() => {
-              setCopied(true)
-              setTimeout(() => setCopied(false), 1400)
-            })
-          }
-          className="absolute top-1.5 right-1.5 inline-flex h-7 items-center gap-1.5 rounded-[5px] bg-white/10 px-2 text-xs text-white/85 transition-colors hover:bg-white/20"
-        >
-          {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-          {copied ? '已复制' : '复制'}
-        </button>
+        <CopyButton value={value} fallbackTarget={() => pre.current} className="absolute top-1.5 right-1.5" />
       </div>
     </div>
   )

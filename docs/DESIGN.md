@@ -653,7 +653,7 @@ export WTOW_TOKEN="wtow_pat_xxx"
 wtow login --base-url <url> --project <slug> --token <token>
 wtow whoami --json
 wtow profile list|use <name>
-wtow skill install [--scope user|project]
+wtow skill install [--scope user|project] [--dir <skills目录>]
 
 wtow raw submit --title "..." --desc "..." --tag finance --attach ./shot.png
 wtow raw list --status Pending --json
