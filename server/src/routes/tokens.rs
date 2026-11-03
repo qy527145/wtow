@@ -7,7 +7,7 @@ use contract::error as code;
 use sqlx::Row;
 
 use crate::app::AppState;
-use crate::auth::{parse_role, parse_roles, random_hex, roles_to_strings, sha256, ProjectCtx, RoleSet, PAT_PREFIX};
+use crate::auth::{parse_role, parse_roles, random_hex, roles_to_strings, sha256, ProjectCtx, PAT_PREFIX};
 use crate::error::{AppError, AppResult};
 
 fn token_from_row(row: &sqlx::postgres::PgRow) -> Token {
@@ -68,16 +68,8 @@ pub async fn create(
     }
     let roles = roles_to_strings(&req.roles);
 
-    // 令牌角色必须是成员当前角色的子集，admin 隐含全部角色。
-    let member_roles: Vec<String> = sqlx::query_scalar(
-        "SELECT roles::text[] FROM memberships WHERE project_id = $1 AND user_id = $2",
-    )
-    .bind(ctx.project_id)
-    .bind(ctx.user_id)
-    .fetch_optional(&st.db)
-    .await?
-    .ok_or_else(|| AppError::not_found("membership"))?;
-    let held = RoleSet::new(parse_roles(member_roles));
+    // 令牌角色必须是调用者当前角色的子集，admin 隐含全部角色；超管按 admin 计。
+    let held = &ctx.roles;
     let missing: Vec<&String> =
         roles.iter().filter(|r| !parse_role(r).map(|r| held.has(r)).unwrap_or(false)).collect();
     if !missing.is_empty() {

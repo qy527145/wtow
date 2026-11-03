@@ -14,6 +14,7 @@ import {
   Shuffle,
   Plug,
   Archive,
+  ShieldCheck,
 } from 'lucide-react'
 import { api } from '../api/client'
 import type { Project, User } from '../api/types'
@@ -46,6 +47,11 @@ export function AppShell({ user }: { user: User }) {
           {current ? <ProjectNav project={current} /> : <GlobalNav />}
         </nav>
         <div className="border-t border-rule p-3">
+          {user.is_superadmin && (
+            <SideLink to="/admin" icon={<ShieldCheck className="size-4" />}>
+              超管面板
+            </SideLink>
+          )}
           <SideLink to="/guide" icon={<BookOpen className="size-4" />} end>
             使用引导
           </SideLink>

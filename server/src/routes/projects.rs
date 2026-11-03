@@ -27,12 +27,14 @@ pub async fn list(
     let rows = sqlx::query(
         "SELECT p.slug, p.name, p.description, p.require_human_triage,
                 p.archived_at IS NOT NULL AS archived,
-                COALESCE(m.roles::text[], '{}') AS my_roles
+                CASE WHEN $2 THEN ARRAY['admin'] ELSE COALESCE(m.roles::text[], '{}') END AS my_roles
            FROM projects p
-           JOIN memberships m ON m.project_id = p.id AND m.user_id = $1
+           LEFT JOIN memberships m ON m.project_id = p.id AND m.user_id = $1
+          WHERE m.user_id IS NOT NULL OR $2
           ORDER BY p.slug",
     )
     .bind(user.user_id)
+    .bind(user.is_superadmin)
     .fetch_all(&st.db)
     .await?;
     Ok(Json(rows.iter().map(project_from_row).collect()))
@@ -93,24 +95,24 @@ pub async fn create(
     Ok((StatusCode::CREATED, Json(project)))
 }
 
+/// 归档项目仍可读，写操作在各自 handler 里拦截。
+/// my_roles 返回本次请求的生效角色（令牌取交集、超管按 admin），前端据此决定显示哪些操作。
 pub async fn get(State(st): State<AppState>, ctx: ProjectCtx) -> AppResult<Json<Project>> {
-    if ctx.archived {
-        // 归档项目仍可读，写操作在各自 handler 里拦截。
-    }
     let row = sqlx::query(
-        "SELECT p.slug, p.name, p.description, p.require_human_triage,
-                p.archived_at IS NOT NULL AS archived,
-                COALESCE(m.roles::text[], '{}') AS my_roles
-           FROM projects p
-           JOIN memberships m ON m.project_id = p.id AND m.user_id = $2
-          WHERE p.slug = $1",
+        "SELECT slug, name, description, require_human_triage, archived_at IS NOT NULL AS archived
+           FROM projects WHERE id = $1",
     )
-    .bind(&ctx.slug)
-    .bind(ctx.user_id)
-    .fetch_optional(&st.db)
-    .await?
-    .ok_or_else(|| AppError::not_found(format!("project {}", ctx.slug)))?;
-    Ok(Json(project_from_row(&row)))
+    .bind(ctx.project_id)
+    .fetch_one(&st.db)
+    .await?;
+    Ok(Json(Project {
+        slug: row.get("slug"),
+        name: row.get("name"),
+        description: row.get("description"),
+        require_human_triage: row.get("require_human_triage"),
+        archived: row.get("archived"),
+        my_roles: ctx.roles.to_vec(),
+    }))
 }
 
 pub async fn update(

@@ -41,6 +41,42 @@ pub struct User {
     pub id: i64,
     pub email: String,
     pub display_name: String,
+    #[serde(default)]
+    pub is_superadmin: bool,
+}
+
+/// 超管面板里的项目行：带上跨项目才需要的统计。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminProject {
+    pub slug: String,
+    pub name: String,
+    pub description: String,
+    pub archived: bool,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub creator: String,
+    pub member_count: i64,
+    pub raw_total: i64,
+    pub raw_pending: i64,
+    pub exec_total: i64,
+    pub exec_open: i64,
+    pub last_activity_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminUser {
+    pub id: i64,
+    pub email: String,
+    pub display_name: String,
+    pub is_superadmin: bool,
+    pub project_count: i64,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminUpdateUserReq {
+    pub is_superadmin: Option<bool>,
+    /// 重置密码；同时让该用户的所有会话失效。
+    pub password: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -16,7 +16,7 @@ pub const MAX_BYTES: usize = 20 * 1024 * 1024;
 const ALLOWED: &[&str] =
     &["image/png", "image/jpeg", "image/gif", "text/plain", "application/json", "application/zip"];
 
-fn root() -> PathBuf {
+pub fn root() -> PathBuf {
     std::env::var("WTOW_ATTACHMENT_DIR").unwrap_or_else(|_| "./data/attachments".into()).into()
 }
 

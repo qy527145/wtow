@@ -52,6 +52,7 @@ pub async fn candidates(State(st): State<AppState>, ctx: ProjectCtx) -> AppResul
                 id: r.get("id"),
                 email: r.get("email"),
                 display_name: r.get("display_name"),
+                is_superadmin: false,
             })
             .collect(),
     ))

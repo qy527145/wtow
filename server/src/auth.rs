@@ -98,6 +98,19 @@ pub struct TokenAuth {
 pub struct UserCtx {
     pub user_id: i64,
     pub token: Option<TokenAuth>,
+    /// 超管在每个项目里都视为 admin，不需要 membership。
+    pub is_superadmin: bool,
+}
+
+impl UserCtx {
+    /// 超管面板只认 Web 会话：项目令牌的权限边界是单个项目，不能借它跨项目。
+    pub fn require_superadmin(&self) -> AppResult<()> {
+        if self.is_superadmin && self.token.is_none() {
+            Ok(())
+        } else {
+            Err(AppError::forbidden(code::FORBIDDEN_ROLE, "requires superadmin"))
+        }
+    }
 }
 
 impl FromRequestParts<AppState> for UserCtx {
@@ -115,7 +128,8 @@ impl FromRequestParts<AppState> for UserCtx {
                   WHERE token_hash = $1 AND revoked_at IS NULL
                     AND (expires_at IS NULL OR expires_at > now())
               RETURNING id, project_id, user_id, roles::text[] AS roles, read_only,
-                        actor_type::text AS actor_type",
+                        actor_type::text AS actor_type,
+                        (SELECT is_superadmin FROM users WHERE id = user_id) AS is_superadmin",
             )
             .bind(sha256(bearer.trim()))
             .fetch_optional(&st.db)
@@ -124,6 +138,7 @@ impl FromRequestParts<AppState> for UserCtx {
             let actor: String = row.get("actor_type");
             return Ok(UserCtx {
                 user_id: row.get("user_id"),
+                is_superadmin: row.get("is_superadmin"),
                 token: Some(TokenAuth {
                     token_id: row.get("id"),
                     project_id: row.get("project_id"),
@@ -142,13 +157,15 @@ impl FromRequestParts<AppState> for UserCtx {
         {
             return Err(AppError::forbidden(code::FORBIDDEN_ROLE, "missing X-Requested-With header"));
         }
-        let user_id: i64 =
-            sqlx::query_scalar("SELECT user_id FROM sessions WHERE id = $1 AND expires_at > now()")
-                .bind(sha256(&sid))
-                .fetch_optional(&st.db)
-                .await?
-                .ok_or_else(AppError::unauthenticated)?;
-        Ok(UserCtx { user_id, token: None })
+        let row = sqlx::query(
+            "SELECT s.user_id, u.is_superadmin FROM sessions s JOIN users u ON u.id = s.user_id
+              WHERE s.id = $1 AND s.expires_at > now()",
+        )
+        .bind(sha256(&sid))
+        .fetch_optional(&st.db)
+        .await?
+        .ok_or_else(AppError::unauthenticated)?;
+        Ok(UserCtx { user_id: row.get("user_id"), token: None, is_superadmin: row.get("is_superadmin") })
     }
 }
 
@@ -220,9 +237,13 @@ impl FromRequestParts<AppState> for ProjectCtx {
             }
         }
         let member_roles: Option<Vec<String>> = row.get("roles");
-        let member = RoleSet::new(parse_roles(
-            member_roles.ok_or_else(|| AppError::not_found(format!("project {slug}")))?,
-        ));
+        let member = if user.is_superadmin {
+            RoleSet::new([Role::Admin])
+        } else {
+            RoleSet::new(parse_roles(
+                member_roles.ok_or_else(|| AppError::not_found(format!("project {slug}")))?,
+            ))
+        };
         let (roles, read_only, actor_type, token_id) = match &user.token {
             Some(t) => (member.intersect(&t.roles), t.read_only, t.actor_type, Some(t.token_id)),
             None => (member, false, ActorType::Human, None),

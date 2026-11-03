@@ -1,4 +1,6 @@
 import type {
+  AdminProject,
+  AdminUser,
   Attachment,
   CreatedToken,
   ErrorBody,
@@ -75,6 +77,12 @@ export const api = {
   register: (email: string, display_name: string, password: string) =>
     request<User>('POST', '/auth/register', { email, display_name, password }),
   logout: () => request<void>('POST', '/auth/logout'),
+
+  adminProjects: () => request<AdminProject[]>('GET', '/admin/projects'),
+  adminDeleteProject: (slug: string) => request<void>('DELETE', `/admin/projects/${encodeURIComponent(slug)}`),
+  adminUsers: () => request<AdminUser[]>('GET', '/admin/users'),
+  adminUpdateUser: (id: number, patch: { is_superadmin?: boolean; password?: string }) =>
+    request<AdminUser>('PATCH', `/admin/users/${id}`, patch),
 
   projects: () => request<Project[]>('GET', '/projects'),
   createProject: (slug: string, name: string, description: string) =>

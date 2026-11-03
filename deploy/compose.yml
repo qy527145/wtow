@@ -43,6 +43,7 @@ services:
       WTOW_ATTACHMENT_DIR: /data/attachments
       WTOW_RELEASE_DIR: /data/releases
       RUST_LOG: ${RUST_LOG:-wtow_server=info}
+      WTOW_SUPERADMIN_EMAILS: ${WTOW_SUPERADMIN_EMAILS:-}
       TZ: ${TZ:-Asia/Shanghai}
     volumes:
       - ./data:/data

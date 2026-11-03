@@ -13,6 +13,31 @@ export interface User {
   id: number
   email: string
   display_name: string
+  is_superadmin: boolean
+}
+
+export interface AdminProject {
+  slug: string
+  name: string
+  description: string
+  archived: boolean
+  created_at: string
+  creator: string
+  member_count: number
+  raw_total: number
+  raw_pending: number
+  exec_total: number
+  exec_open: number
+  last_activity_at: string | null
+}
+
+export interface AdminUser {
+  id: number
+  email: string
+  display_name: string
+  is_superadmin: boolean
+  project_count: number
+  created_at: string
 }
 
 export interface Project {

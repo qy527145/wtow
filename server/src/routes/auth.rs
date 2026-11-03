@@ -36,14 +36,15 @@ pub async fn register(
     }
     let hash = hash_password(&req.password)?;
     let row = sqlx::query(
-        "INSERT INTO users (email, display_name, password_hash)
-         VALUES ($1, $2, $3)
+        "INSERT INTO users (email, display_name, password_hash, is_superadmin)
+         VALUES ($1, $2, $3, $1 = ANY($4))
          ON CONFLICT (email) DO NOTHING
-         RETURNING id, email, display_name",
+         RETURNING id, email, display_name, is_superadmin",
     )
     .bind(req.email.trim().to_lowercase())
     .bind(req.display_name.trim())
     .bind(hash)
+    .bind(crate::app::superadmin_emails())
     .fetch_optional(&st.db)
     .await?
     .ok_or_else(|| AppError::conflict(code::VALIDATION, "email already registered"))?;
@@ -51,6 +52,7 @@ pub async fn register(
         id: row.get("id"),
         email: row.get("email"),
         display_name: row.get("display_name"),
+        is_superadmin: row.get("is_superadmin"),
     })))
 }
 
@@ -60,7 +62,7 @@ pub async fn login(
     Json(req): Json<LoginReq>,
 ) -> AppResult<(CookieJar, Json<User>)> {
     let row = sqlx::query(
-        "SELECT id, email, display_name, password_hash FROM users
+        "SELECT id, email, display_name, password_hash, is_superadmin FROM users
           WHERE email = $1",
     )
     .bind(req.email.trim().to_lowercase())
@@ -82,6 +84,7 @@ pub async fn login(
         id: row.get("id"),
         email: row.get("email"),
         display_name: row.get("display_name"),
+        is_superadmin: row.get("is_superadmin"),
     })))
 }
 
@@ -96,7 +99,7 @@ pub async fn logout(State(st): State<AppState>, jar: CookieJar) -> AppResult<imp
 }
 
 pub async fn me(State(st): State<AppState>, user: UserCtx) -> AppResult<Json<User>> {
-    let row = sqlx::query("SELECT id, email, display_name FROM users WHERE id = $1")
+    let row = sqlx::query("SELECT id, email, display_name, is_superadmin FROM users WHERE id = $1")
         .bind(user.user_id)
         .fetch_optional(&st.db)
         .await?
@@ -105,6 +108,7 @@ pub async fn me(State(st): State<AppState>, user: UserCtx) -> AppResult<Json<Use
         id: row.get("id"),
         email: row.get("email"),
         display_name: row.get("display_name"),
+        is_superadmin: row.get("is_superadmin"),
     }))
 }
 
@@ -123,7 +127,7 @@ pub async fn update_me(
     if name.chars().count() > 64 {
         return Err(AppError::validation("display_name must be at most 64 characters"));
     }
-    let row = sqlx::query("UPDATE users SET display_name = $2 WHERE id = $1 RETURNING id, email, display_name")
+    let row = sqlx::query("UPDATE users SET display_name = $2 WHERE id = $1 RETURNING id, email, display_name, is_superadmin")
         .bind(user.user_id)
         .bind(name)
         .fetch_optional(&st.db)
@@ -133,5 +137,6 @@ pub async fn update_me(
         id: row.get("id"),
         email: row.get("email"),
         display_name: row.get("display_name"),
+        is_superadmin: row.get("is_superadmin"),
     }))
 }

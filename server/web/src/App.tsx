@@ -13,6 +13,7 @@ import { ExecPipelinePage } from './pages/ExecPipeline'
 // 低频页面按需加载，首屏只带看板相关代码。
 const GuidePage = lazy(() => import('./pages/Guide').then((m) => ({ default: m.GuidePage })))
 const WorkbenchPage = lazy(() => import('./pages/Workbench').then((m) => ({ default: m.WorkbenchPage })))
+const AdminPage = lazy(() => import('./pages/Admin').then((m) => ({ default: m.AdminPage })))
 const SettingsPage = lazy(() => import('./pages/Settings').then((m) => ({ default: m.SettingsPage })))
 
 export function App() {
@@ -42,6 +43,7 @@ export function App() {
       <Route element={<AppShell user={me.data} />}>
         <Route index element={<ProjectsPage />} />
         <Route path="guide" element={<GuidePage />} />
+        {me.data.is_superadmin && <Route path="admin" element={<AdminPage user={me.data} />} />}
         <Route path="p/:slug" element={<ProjectFrame />}>
           <Route index element={<OverviewPage />} />
           <Route path="raw" element={<RawPipelinePage />} />

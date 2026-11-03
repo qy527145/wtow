@@ -69,6 +69,7 @@ bun run smoke
 | `WTOW_PUBLIC_BASE_URL` | `http://127.0.0.1:8080` | 对外地址，用于安装脚本和下载页 |
 | `WTOW_ATTACHMENT_DIR` | `./data/attachments` | 附件存储目录 |
 | `WTOW_RELEASE_DIR` | `./data/releases` | CLI 发布产物与 `latest.json` 所在目录 |
+| `WTOW_SUPERADMIN_EMAILS` | 空 | 逗号分隔的邮箱，注册或启动时自动设为超管；超管在侧栏有「超管面板」，能看所有项目、管理用户，进任意项目都按管理员处理 |
 | `WTOW_MINISIGN_PUBKEY` | 空 | 配置后，安装脚本会校验 `latest.json` 的签名 |
 | `RUST_LOG` | `wtow_server=info` | 日志级别 |
 

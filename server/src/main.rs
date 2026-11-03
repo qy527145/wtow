@@ -27,6 +27,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
     sqlx::migrate!("./migrations").run(&db).await?;
 
+    // 名单里的邮箱每次启动都提升为超管；撤销需在面板里操作，不会因从名单删掉而自动降级。
+    let superadmins = app::superadmin_emails();
+    if !superadmins.is_empty() {
+        let n = sqlx::query("UPDATE users SET is_superadmin = true WHERE email = ANY($1) AND NOT is_superadmin")
+            .bind(&superadmins)
+            .execute(&db)
+            .await?
+            .rows_affected();
+        tracing::info!(promoted = n, "superadmin emails applied");
+    }
+
     let state = app::AppState::new(db);
     tokio::spawn(idempotency::release_stale_claims(state.clone()));
 
@@ -36,6 +47,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/auth/login", post(routes::auth::login))
         .route("/auth/logout", post(routes::auth::logout))
         .route("/me", get(routes::auth::me).patch(routes::auth::update_me))
+        .route("/admin/projects", get(routes::admin::projects))
+        .route("/admin/projects/{slug}", axum::routing::delete(routes::admin::delete_project))
+        .route("/admin/users", get(routes::admin::users))
+        .route("/admin/users/{id}", axum::routing::patch(routes::admin::update_user))
         .route("/projects", get(routes::projects::list).post(routes::projects::create))
         .route("/projects/{slug}", get(routes::projects::get).patch(routes::projects::update))
         .route("/projects/{slug}/members", get(routes::members::list).put(routes::members::upsert))
