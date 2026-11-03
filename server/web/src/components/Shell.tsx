@@ -1,4 +1,4 @@
-import { Suspense, useEffect } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate, useParams } from 'react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -9,6 +9,7 @@ import {
   Inbox,
   LayoutDashboard,
   LogOut,
+  PenLine,
   Settings,
   Shuffle,
   Plug,
@@ -18,7 +19,8 @@ import { api } from '../api/client'
 import type { Project, User } from '../api/types'
 import { cn } from '../lib/cn'
 import { hasRole, ROLE_LABEL } from '../lib/format'
-import { Avatar, ErrorNote, Menu, Spinner } from './ui'
+import { toast } from 'sonner'
+import { Avatar, Button, Dialog, ErrorNote, Field, Input, Menu, Spinner } from './ui'
 
 const LAST_PROJECT_KEY = 'wtow:last-project'
 
@@ -240,25 +242,75 @@ function UserMenu({ user }: { user: User }) {
       navigate('/login')
     },
   })
+  const [renaming, setRenaming] = useState(false)
   const name = user.display_name || user.email
   return (
-    <Menu.Root>
-      <Menu.Trigger asChild>
-        <button className="mt-1 flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left hover:bg-ink/[0.04]">
-          <Avatar name={name} size={24} />
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-[13px] font-medium">{name}</span>
-            <span className="block truncate text-[11px] text-faint">{user.email}</span>
-          </span>
-        </button>
-      </Menu.Trigger>
-      <Menu.Content align="start">
-        <Menu.Item onSelect={() => logout.mutate()} danger>
-          <LogOut className="size-4" />
-          退出登录
-        </Menu.Item>
-      </Menu.Content>
-    </Menu.Root>
+    <>
+      <Menu.Root>
+        <Menu.Trigger asChild>
+          <button className="mt-1 flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left hover:bg-ink/[0.04]">
+            <Avatar name={name} size={24} />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[13px] font-medium">{name}</span>
+              <span className="block truncate text-[11px] text-faint">{user.email}</span>
+            </span>
+          </button>
+        </Menu.Trigger>
+        <Menu.Content align="start">
+          <Menu.Item onSelect={() => setRenaming(true)}>
+            <PenLine className="size-4" />
+            修改昵称
+          </Menu.Item>
+          <Menu.Item onSelect={() => logout.mutate()} danger>
+            <LogOut className="size-4" />
+            退出登录
+          </Menu.Item>
+        </Menu.Content>
+      </Menu.Root>
+      <RenameDialog user={user} open={renaming} onClose={() => setRenaming(false)} />
+    </>
+  )
+}
+
+function RenameDialog({ user, open, onClose }: { user: User; open: boolean; onClose: () => void }) {
+  const qc = useQueryClient()
+  const [name, setName] = useState('')
+  useEffect(() => {
+    if (open) setName(user.display_name)
+  }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
+  const save = useMutation({
+    mutationFn: () => api.updateMe(name),
+    onSuccess: (u) => {
+      qc.setQueryData(['me'], u)
+      // 成员列表里也带着昵称，各处显示名都从这里取。
+      qc.invalidateQueries({ queryKey: ['members'] })
+      toast.success('昵称已更新')
+      onClose()
+    },
+  })
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()} title="修改昵称" description="昵称会显示在所有项目里。">
+      <form
+        className="flex flex-col gap-4"
+        onSubmit={(e) => {
+          e.preventDefault()
+          save.mutate()
+        }}
+      >
+        <Field label="昵称">
+          <Input autoFocus value={name} maxLength={64} onChange={(e) => setName(e.target.value)} required />
+        </Field>
+        <ErrorNote error={save.error} />
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onClose}>
+            取消
+          </Button>
+          <Button variant="primary" loading={save.isPending} disabled={!name.trim() || name.trim() === user.display_name}>
+            保存
+          </Button>
+        </div>
+      </form>
+    </Dialog>
   )
 }
 

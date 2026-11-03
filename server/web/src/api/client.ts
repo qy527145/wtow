@@ -70,6 +70,7 @@ export const api = {
   meta: () => request<Meta>('GET', '/meta'),
 
   me: () => request<User>('GET', '/me'),
+  updateMe: (display_name: string) => request<User>('PATCH', '/me', { display_name }),
   login: (email: string, password: string) => request<User>('POST', '/auth/login', { email, password }),
   register: (email: string, display_name: string, password: string) =>
     request<User>('POST', '/auth/register', { email, display_name, password }),

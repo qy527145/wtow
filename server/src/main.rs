@@ -35,7 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/auth/register", post(routes::auth::register))
         .route("/auth/login", post(routes::auth::login))
         .route("/auth/logout", post(routes::auth::logout))
-        .route("/me", get(routes::auth::me))
+        .route("/me", get(routes::auth::me).patch(routes::auth::update_me))
         .route("/projects", get(routes::projects::list).post(routes::projects::create))
         .route("/projects/{slug}", get(routes::projects::get).patch(routes::projects::update))
         .route("/projects/{slug}/members", get(routes::members::list).put(routes::members::upsert))

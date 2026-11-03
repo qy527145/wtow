@@ -5,7 +5,7 @@ use axum::Json;
 use axum_extra::extract::cookie::{Cookie, SameSite};
 use axum_extra::extract::CookieJar;
 use chrono::{Duration, Utc};
-use contract::dto::{LoginReq, RegisterReq, User};
+use contract::dto::{LoginReq, RegisterReq, UpdateMeReq, User};
 use contract::error as code;
 use sqlx::Row;
 
@@ -98,6 +98,34 @@ pub async fn logout(State(st): State<AppState>, jar: CookieJar) -> AppResult<imp
 pub async fn me(State(st): State<AppState>, user: UserCtx) -> AppResult<Json<User>> {
     let row = sqlx::query("SELECT id, email, display_name FROM users WHERE id = $1")
         .bind(user.user_id)
+        .fetch_optional(&st.db)
+        .await?
+        .ok_or_else(AppError::unauthenticated)?;
+    Ok(Json(User {
+        id: row.get("id"),
+        email: row.get("email"),
+        display_name: row.get("display_name"),
+    }))
+}
+
+pub async fn update_me(
+    State(st): State<AppState>,
+    user: UserCtx,
+    Json(req): Json<UpdateMeReq>,
+) -> AppResult<Json<User>> {
+    if user.token.as_ref().is_some_and(|t| t.read_only) {
+        return Err(AppError::forbidden(code::TOKEN_READ_ONLY, "token is read-only"));
+    }
+    let name = req.display_name.trim();
+    if name.is_empty() {
+        return Err(AppError::validation("display_name must not be empty"));
+    }
+    if name.chars().count() > 64 {
+        return Err(AppError::validation("display_name must be at most 64 characters"));
+    }
+    let row = sqlx::query("UPDATE users SET display_name = $2 WHERE id = $1 RETURNING id, email, display_name")
+        .bind(user.user_id)
+        .bind(name)
         .fetch_optional(&st.db)
         .await?
         .ok_or_else(AppError::unauthenticated)?;

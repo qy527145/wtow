@@ -44,6 +44,11 @@ pub struct User {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateMeReq {
+    pub display_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateProjectReq {
     pub slug: String,
     pub name: String,
