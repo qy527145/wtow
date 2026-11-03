@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Archive, KeyRound, MoreHorizontal, UserPlus } from 'lucide-react'
+import { Archive, Check, KeyRound, MoreHorizontal, UserPlus } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '../api/client'
-import type { CreatedToken, Member, Project, Role } from '../api/types'
+import type { CreatedToken, Member, Project, Role, User } from '../api/types'
 import { PageHeader } from '../components/Shell'
 import { Avatar, Button, Check2, CopyField, Dialog, ErrorNote, Field, Input, Menu, Select, Textarea } from '../components/ui'
 import { cn } from '../lib/cn'
@@ -124,7 +124,7 @@ function Members({ slug, editable }: { slug: string; editable: boolean }) {
   return (
     <Block
       title="成员"
-      description="一个人可以同时有多个角色。对方要先用邮箱注册，才能被加进来。"
+      description="一个人可以同时有多个角色。对方要先注册账号，才能被加进来。"
       action={
         editable && (
           <Button size="sm" onClick={() => setEditing('new')}>
@@ -217,10 +217,16 @@ function MemberDialog({ slug, member, onClose }: { slug: string; member: Member 
     setEmail(existing?.email ?? '')
     setRoles(existing?.roles ?? ['tester'])
   }, [member]) // eslint-disable-line react-hooks/exhaustive-deps
+  const candidates = useQuery({
+    queryKey: ['member-candidates', slug],
+    queryFn: () => api.memberCandidates(slug),
+    enabled: member === 'new',
+  })
   const save = useMutation({
     mutationFn: () => api.upsertMember(slug, email, roles),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['members', slug] })
+      qc.invalidateQueries({ queryKey: ['member-candidates', slug] })
       toast.success(existing ? '角色已更新' : `已添加 ${email}`)
       onClose()
     },
@@ -240,8 +246,8 @@ function MemberDialog({ slug, member, onClose }: { slug: string; member: Member 
         }}
       >
         {!existing && (
-          <Field label="注册邮箱">
-            <Input autoFocus type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+          <Field label="选择用户">
+            <UserPicker users={candidates.data} loading={candidates.isLoading} value={email} onChange={setEmail} />
           </Field>
         )}
         <Field label="角色">
@@ -252,12 +258,60 @@ function MemberDialog({ slug, member, onClose }: { slug: string; member: Member 
           <Button type="button" variant="ghost" onClick={onClose}>
             取消
           </Button>
-          <Button variant="primary" loading={save.isPending} disabled={roles.length === 0}>
+          <Button variant="primary" loading={save.isPending} disabled={roles.length === 0 || !email}>
             {existing ? '保存' : '添加'}
           </Button>
         </div>
       </form>
     </Dialog>
+  )
+}
+
+function UserPicker({
+  users,
+  loading,
+  value,
+  onChange,
+}: {
+  users: User[] | undefined
+  loading: boolean
+  value: string
+  onChange: (email: string) => void
+}) {
+  const [q, setQ] = useState('')
+  const kw = q.trim().toLowerCase()
+  const list = (users ?? []).filter((u) => !kw || u.email.includes(kw) || u.display_name.toLowerCase().includes(kw))
+  return (
+    <div className="flex flex-col gap-2">
+      <Input autoFocus placeholder="按邮箱或名字搜索" value={q} onChange={(e) => setQ(e.target.value)} />
+      <ul className="max-h-60 divide-y divide-rule overflow-y-auto rounded-md border border-rule-strong">
+        {loading && <li className="px-3 py-4 text-center text-[13px] text-graphite">加载中…</li>}
+        {!loading && list.length === 0 && (
+          <li className="px-3 py-4 text-center text-[13px] text-graphite">
+            {users?.length ? '没有匹配的用户。' : '所有注册用户都已在项目里。'}
+          </li>
+        )}
+        {list.map((u) => (
+          <li key={u.id}>
+            <button
+              type="button"
+              onClick={() => onChange(u.email)}
+              className={cn(
+                'flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors',
+                value === u.email ? 'bg-pencil-wash' : 'hover:bg-paper',
+              )}
+            >
+              <Avatar name={u.display_name || u.email} size={24} />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[13px] font-medium">{u.display_name || u.email}</div>
+                <div className="truncate text-xs text-faint">{u.email}</div>
+              </div>
+              {value === u.email && <Check className="size-4 text-pencil" />}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
   )
 }
 

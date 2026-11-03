@@ -1,7 +1,7 @@
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::Json;
-use contract::dto::{Member, Role, UpsertMemberReq};
+use contract::dto::{Member, Role, UpsertMemberReq, User};
 use contract::error as code;
 use sqlx::Row;
 
@@ -27,6 +27,31 @@ pub async fn list(State(st): State<AppState>, ctx: ProjectCtx) -> AppResult<Json
                 email: r.get("email"),
                 display_name: r.get("display_name"),
                 roles: parse_roles(r.get("roles")),
+            })
+            .collect(),
+    ))
+}
+
+/// 可添加的候选人：所有已注册但还不在本项目里的用户，仅管理员可见。
+pub async fn candidates(State(st): State<AppState>, ctx: ProjectCtx) -> AppResult<Json<Vec<User>>> {
+    ctx.require(Role::Admin)?;
+    let rows = sqlx::query(
+        "SELECT u.id, u.email, u.display_name
+           FROM users u
+          WHERE NOT EXISTS (
+                SELECT 1 FROM memberships m WHERE m.project_id = $1 AND m.user_id = u.id
+          )
+          ORDER BY u.email",
+    )
+    .bind(ctx.project_id)
+    .fetch_all(&st.db)
+    .await?;
+    Ok(Json(
+        rows.iter()
+            .map(|r| User {
+                id: r.get("id"),
+                email: r.get("email"),
+                display_name: r.get("display_name"),
             })
             .collect(),
     ))

@@ -39,6 +39,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/projects", get(routes::projects::list).post(routes::projects::create))
         .route("/projects/{slug}", get(routes::projects::get).patch(routes::projects::update))
         .route("/projects/{slug}/members", get(routes::members::list).put(routes::members::upsert))
+        .route("/projects/{slug}/members/candidates", get(routes::members::candidates))
         .route("/projects/{slug}/members/{user_id}", axum::routing::delete(routes::members::remove))
         .route("/projects/{slug}/tokens", get(routes::tokens::list).post(routes::tokens::create))
         .route("/projects/{slug}/tokens/{id}/revoke", post(routes::tokens::revoke))

@@ -85,6 +85,7 @@ export const api = {
   ) => request<Project>('PATCH', p(slug), patch),
 
   members: (slug: string) => request<Member[]>('GET', `${p(slug)}/members`),
+  memberCandidates: (slug: string) => request<User[]>('GET', `${p(slug)}/members/candidates`),
   upsertMember: (slug: string, email: string, roles: Role[]) =>
     request<Member>('PUT', `${p(slug)}/members`, { email, roles }),
   removeMember: (slug: string, userId: number) => request<void>('DELETE', `${p(slug)}/members/${userId}`),
