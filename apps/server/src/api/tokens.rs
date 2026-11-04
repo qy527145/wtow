@@ -1,14 +1,16 @@
+use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::Json;
 use chrono::{Duration, Utc};
 use contract::dto::{ActorType, CreateTokenReq, CreatedToken, Role, Token, WhoAmI};
 use contract::error as code;
 use sqlx::Row;
 
-use crate::app::AppState;
-use crate::auth::{parse_role, parse_roles, random_hex, roles_to_strings, sha256, ProjectCtx, PAT_PREFIX};
+use crate::auth::{
+    PAT_PREFIX, ProjectCtx, parse_role, parse_roles, random_hex, roles_to_strings, sha256,
+};
 use crate::error::{AppError, AppResult};
+use crate::state::AppState;
 
 fn token_from_row(row: &sqlx::postgres::PgRow) -> Token {
     let actor: String = row.get("actor_type");
@@ -18,7 +20,11 @@ fn token_from_row(row: &sqlx::postgres::PgRow) -> Token {
         prefix: row.get("token_prefix"),
         roles: parse_roles(row.get("roles")),
         read_only: row.get("read_only"),
-        actor_type: if actor == "human" { ActorType::Human } else { ActorType::Agent },
+        actor_type: if actor == "human" {
+            ActorType::Human
+        } else {
+            ActorType::Agent
+        },
         revoked: row.get("revoked"),
         user_id: row.get("user_id"),
         owner: row.get("owner"),
@@ -61,17 +67,19 @@ pub async fn create(
     if req.roles.is_empty() {
         return Err(AppError::validation("roles must not be empty"));
     }
-    if let Some(d) = req.expires_in_days {
-        if d <= 0 {
-            return Err(AppError::validation("expires_in_days must be positive"));
-        }
+    if let Some(d) = req.expires_in_days
+        && d <= 0
+    {
+        return Err(AppError::validation("expires_in_days must be positive"));
     }
     let roles = roles_to_strings(&req.roles);
 
     // 令牌角色必须是调用者当前角色的子集，admin 隐含全部角色；超管按 admin 计。
     let held = &ctx.roles;
-    let missing: Vec<&String> =
-        roles.iter().filter(|r| !parse_role(r).map(|r| held.has(r)).unwrap_or(false)).collect();
+    let missing: Vec<&String> = roles
+        .iter()
+        .filter(|r| !parse_role(r).map(|r| held.has(r)).unwrap_or(false))
+        .collect();
     if !missing.is_empty() {
         return Err(AppError::forbidden(
             code::FORBIDDEN_ROLE,
@@ -107,7 +115,13 @@ pub async fn create(
     .fetch_one(&st.db)
     .await?;
 
-    Ok((StatusCode::CREATED, Json(CreatedToken { token: token_from_row(&row), secret })))
+    Ok((
+        StatusCode::CREATED,
+        Json(CreatedToken {
+            token: token_from_row(&row),
+            secret,
+        }),
+    ))
 }
 
 pub async fn revoke(
@@ -147,4 +161,13 @@ pub async fn whoami(State(st): State<AppState>, ctx: ProjectCtx) -> AppResult<Js
         actor_type: ctx.actor_type,
         read_only: ctx.read_only,
     }))
+}
+
+/// 项目令牌与 `whoami`。
+pub fn router() -> axum::Router<AppState> {
+    use axum::routing::{get, post};
+    axum::Router::new()
+        .route("/projects/{slug}/tokens", get(list).post(create))
+        .route("/projects/{slug}/tokens/{id}/revoke", post(revoke))
+        .route("/projects/{slug}/whoami", get(whoami))
 }

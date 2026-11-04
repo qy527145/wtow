@@ -1,13 +1,13 @@
+use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::Json;
 use contract::dto::{Member, Role, UpsertMemberReq, User};
 use contract::error as code;
 use sqlx::Row;
 
-use crate::app::AppState;
-use crate::auth::{parse_roles, roles_to_strings, ProjectCtx};
+use crate::auth::{ProjectCtx, parse_roles, roles_to_strings};
 use crate::error::{AppError, AppResult};
+use crate::state::AppState;
 
 pub async fn list(State(st): State<AppState>, ctx: ProjectCtx) -> AppResult<Json<Vec<Member>>> {
     let rows = sqlx::query(
@@ -101,15 +101,18 @@ pub async fn upsert(
     .fetch_one(&st.db)
     .await?;
 
-    Ok((StatusCode::OK, Json(Member {
-        user_id,
-        email,
-        display_name: sqlx::query_scalar("SELECT display_name FROM users WHERE id = $1")
-            .bind(user_id)
-            .fetch_one(&st.db)
-            .await?,
-        roles: parse_roles(row.get("roles")),
-    })))
+    Ok((
+        StatusCode::OK,
+        Json(Member {
+            user_id,
+            email,
+            display_name: sqlx::query_scalar("SELECT display_name FROM users WHERE id = $1")
+                .bind(user_id)
+                .fetch_one(&st.db)
+                .await?,
+            roles: parse_roles(row.get("roles")),
+        }),
+    ))
 }
 
 pub async fn remove(
@@ -120,7 +123,10 @@ pub async fn remove(
     ctx.require(Role::Admin)?;
     ctx.require_write()?;
     if user_id == ctx.user_id {
-        return Err(AppError::conflict(code::VALIDATION, "cannot remove yourself"));
+        return Err(AppError::conflict(
+            code::VALIDATION,
+            "cannot remove yourself",
+        ));
     }
     let n = sqlx::query("DELETE FROM memberships WHERE project_id = $1 AND user_id = $2")
         .bind(ctx.project_id)
@@ -137,4 +143,13 @@ pub async fn remove(
         .execute(&st.db)
         .await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// 项目成员与候选人。
+pub fn router() -> axum::Router<AppState> {
+    use axum::routing::{delete, get};
+    axum::Router::new()
+        .route("/projects/{slug}/members", get(list).put(upsert))
+        .route("/projects/{slug}/members/candidates", get(candidates))
+        .route("/projects/{slug}/members/{user_id}", delete(remove))
 }

@@ -1,17 +1,17 @@
+use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use axum::Json;
-use axum_extra::extract::cookie::{Cookie, SameSite};
 use axum_extra::extract::CookieJar;
+use axum_extra::extract::cookie::{Cookie, SameSite};
 use chrono::{Duration, Utc};
 use contract::dto::{LoginReq, RegisterReq, UpdateMeReq, User};
 use contract::error as code;
 use sqlx::Row;
 
-use crate::app::AppState;
-use crate::auth::{hash_password, random_hex, sha256, verify_password, UserCtx, SESSION_COOKIE};
+use crate::auth::{SESSION_COOKIE, UserCtx, hash_password, random_hex, sha256, verify_password};
 use crate::error::{AppError, AppResult};
+use crate::state::AppState;
 
 pub const SESSION_TTL_DAYS: i64 = 30;
 
@@ -32,7 +32,9 @@ pub async fn register(
         return Err(AppError::validation("invalid email"));
     }
     if req.password.len() < 8 {
-        return Err(AppError::validation("password must be at least 8 characters"));
+        return Err(AppError::validation(
+            "password must be at least 8 characters",
+        ));
     }
     let hash = hash_password(&req.password)?;
     let row = sqlx::query(
@@ -44,16 +46,19 @@ pub async fn register(
     .bind(req.email.trim().to_lowercase())
     .bind(req.display_name.trim())
     .bind(hash)
-    .bind(crate::app::superadmin_emails())
+    .bind(&st.config.superadmin_emails)
     .fetch_optional(&st.db)
     .await?
     .ok_or_else(|| AppError::conflict(code::VALIDATION, "email already registered"))?;
-    Ok((StatusCode::CREATED, Json(User {
-        id: row.get("id"),
-        email: row.get("email"),
-        display_name: row.get("display_name"),
-        is_superadmin: row.get("is_superadmin"),
-    })))
+    Ok((
+        StatusCode::CREATED,
+        Json(User {
+            id: row.get("id"),
+            email: row.get("email"),
+            display_name: row.get("display_name"),
+            is_superadmin: row.get("is_superadmin"),
+        }),
+    ))
 }
 
 pub async fn login(
@@ -80,12 +85,15 @@ pub async fn login(
         .bind(Utc::now() + Duration::days(SESSION_TTL_DAYS))
         .execute(&st.db)
         .await?;
-    Ok((jar.add(session_cookie(sid)), Json(User {
-        id: row.get("id"),
-        email: row.get("email"),
-        display_name: row.get("display_name"),
-        is_superadmin: row.get("is_superadmin"),
-    })))
+    Ok((
+        jar.add(session_cookie(sid)),
+        Json(User {
+            id: row.get("id"),
+            email: row.get("email"),
+            display_name: row.get("display_name"),
+            is_superadmin: row.get("is_superadmin"),
+        }),
+    ))
 }
 
 pub async fn logout(State(st): State<AppState>, jar: CookieJar) -> AppResult<impl IntoResponse> {
@@ -95,7 +103,10 @@ pub async fn logout(State(st): State<AppState>, jar: CookieJar) -> AppResult<imp
             .execute(&st.db)
             .await?;
     }
-    Ok((jar.remove(Cookie::from(SESSION_COOKIE)), StatusCode::NO_CONTENT))
+    Ok((
+        jar.remove(Cookie::from(SESSION_COOKIE)),
+        StatusCode::NO_CONTENT,
+    ))
 }
 
 pub async fn me(State(st): State<AppState>, user: UserCtx) -> AppResult<Json<User>> {
@@ -118,14 +129,19 @@ pub async fn update_me(
     Json(req): Json<UpdateMeReq>,
 ) -> AppResult<Json<User>> {
     if user.token.as_ref().is_some_and(|t| t.read_only) {
-        return Err(AppError::forbidden(code::TOKEN_READ_ONLY, "token is read-only"));
+        return Err(AppError::forbidden(
+            code::TOKEN_READ_ONLY,
+            "token is read-only",
+        ));
     }
     let name = req.display_name.trim();
     if name.is_empty() {
         return Err(AppError::validation("display_name must not be empty"));
     }
     if name.chars().count() > 64 {
-        return Err(AppError::validation("display_name must be at most 64 characters"));
+        return Err(AppError::validation(
+            "display_name must be at most 64 characters",
+        ));
     }
     let row = sqlx::query("UPDATE users SET display_name = $2 WHERE id = $1 RETURNING id, email, display_name, is_superadmin")
         .bind(user.user_id)
@@ -139,4 +155,14 @@ pub async fn update_me(
         display_name: row.get("display_name"),
         is_superadmin: row.get("is_superadmin"),
     }))
+}
+
+/// 注册、登录、登出与当前用户。
+pub fn router() -> axum::Router<AppState> {
+    use axum::routing::{get, post};
+    axum::Router::new()
+        .route("/auth/register", post(register))
+        .route("/auth/login", post(login))
+        .route("/auth/logout", post(logout))
+        .route("/me", get(me).patch(update_me))
 }

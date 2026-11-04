@@ -3,19 +3,31 @@ use std::path::{Path, PathBuf};
 use std::process::exit;
 
 use clap::{Args, Parser, Subcommand};
-use contract::error::{exit_code_for_status, ErrorEnvelope};
-use reqwest::blocking::{multipart, Client, RequestBuilder, Response};
+use contract::error::{ErrorEnvelope, exit_code_for_status};
 use reqwest::Method;
+use reqwest::blocking::{Client, RequestBuilder, Response, multipart};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const SKILL_FILES: &[(&str, &str)] = &[
     ("SKILL.md", include_str!("../skill/SKILL.md")),
-    ("references/assigner.md", include_str!("../skill/references/assigner.md")),
-    ("references/developer.md", include_str!("../skill/references/developer.md")),
-    ("references/tester.md", include_str!("../skill/references/tester.md")),
-    ("references/cli.md", include_str!("../skill/references/cli.md")),
+    (
+        "references/assigner.md",
+        include_str!("../skill/references/assigner.md"),
+    ),
+    (
+        "references/developer.md",
+        include_str!("../skill/references/developer.md"),
+    ),
+    (
+        "references/tester.md",
+        include_str!("../skill/references/tester.md"),
+    ),
+    (
+        "references/cli.md",
+        include_str!("../skill/references/cli.md"),
+    ),
 ];
 
 #[derive(Parser)]
@@ -129,10 +141,18 @@ enum RawCmd {
         #[arg(long, num_args = 0..=1)]
         download: Option<Option<PathBuf>>,
     },
-    Claim { id: String },
-    Release { id: String },
-    Related { id: String },
-    Execs { id: String },
+    Claim {
+        id: String,
+    },
+    Release {
+        id: String,
+    },
+    Related {
+        id: String,
+    },
+    Execs {
+        id: String,
+    },
     Edit {
         id: String,
         #[arg(long)]
@@ -214,7 +234,9 @@ enum ExecCmd {
         #[arg(long, num_args = 0..=1)]
         download: Option<Option<PathBuf>>,
     },
-    Raws { id: String },
+    Raws {
+        id: String,
+    },
     Claim {
         id: String,
         #[arg(long)]
@@ -283,7 +305,10 @@ struct RepoConfig {
 
 fn fail(code: i32, json: bool, err_code: &str, message: &str) -> ! {
     if json {
-        eprintln!("{}", json!({ "error": { "code": err_code, "message": message, "details": null } }));
+        eprintln!(
+            "{}",
+            json!({ "error": { "code": err_code, "message": message, "details": null } })
+        );
     } else {
         eprintln!("error: {message}");
     }
@@ -291,11 +316,16 @@ fn fail(code: i32, json: bool, err_code: &str, message: &str) -> ! {
 }
 
 fn config_path() -> PathBuf {
-    dirs::config_dir().unwrap_or_else(|| PathBuf::from(".")).join("wtow/config.toml")
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("wtow/config.toml")
 }
 
 fn load_user_config() -> UserConfig {
-    std::fs::read_to_string(config_path()).ok().and_then(|s| toml::from_str(&s).ok()).unwrap_or_default()
+    std::fs::read_to_string(config_path())
+        .ok()
+        .and_then(|s| toml::from_str(&s).ok())
+        .unwrap_or_default()
 }
 
 fn save_user_config(cfg: &UserConfig, json: bool) {
@@ -311,7 +341,12 @@ fn save_user_config(cfg: &UserConfig, json: bool) {
         Ok(())
     };
     if let Err(e) = write() {
-        fail(1, json, "CONFIG", &format!("cannot write {}: {e}", path.display()));
+        fail(
+            1,
+            json,
+            "CONFIG",
+            &format!("cannot write {}: {e}", path.display()),
+        );
     }
 }
 
@@ -320,7 +355,10 @@ fn find_repo_config() -> RepoConfig {
     while let Some(d) = dir {
         let p = d.join(".wtow.toml");
         if p.is_file() {
-            return std::fs::read_to_string(p).ok().and_then(|s| toml::from_str(&s).ok()).unwrap_or_default();
+            return std::fs::read_to_string(p)
+                .ok()
+                .and_then(|s| toml::from_str(&s).ok())
+                .unwrap_or_default();
         }
         dir = d.parent().map(Path::to_path_buf);
     }
@@ -339,26 +377,56 @@ fn resolve(g: &Global) -> Resolved {
     let prof = user.active.as_ref().and_then(|a| user.profiles.get(a));
     let repo = find_repo_config();
     let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
-    let pick = |flag: &Option<String>, env_key: &str, repo_v: Option<&String>, prof_v: Option<&String>| {
-        flag.clone().or_else(|| env(env_key)).or_else(|| repo_v.cloned()).or_else(|| prof_v.cloned())
-    };
-    let base_url = pick(&g.base_url, "WTOW_BASE_URL", repo.base_url.as_ref(), prof.and_then(|p| p.base_url.as_ref()));
-    let project = pick(&g.project, "WTOW_PROJECT", repo.project.as_ref(), prof.and_then(|p| p.project.as_ref()));
-    let token = g.token.clone().or_else(|| env("WTOW_TOKEN")).or_else(|| prof.and_then(|p| p.token.clone()));
+    let pick =
+        |flag: &Option<String>, env_key: &str, repo_v: Option<&String>, prof_v: Option<&String>| {
+            flag.clone()
+                .or_else(|| env(env_key))
+                .or_else(|| repo_v.cloned())
+                .or_else(|| prof_v.cloned())
+        };
+    let base_url = pick(
+        &g.base_url,
+        "WTOW_BASE_URL",
+        repo.base_url.as_ref(),
+        prof.and_then(|p| p.base_url.as_ref()),
+    );
+    let project = pick(
+        &g.project,
+        "WTOW_PROJECT",
+        repo.project.as_ref(),
+        prof.and_then(|p| p.project.as_ref()),
+    );
+    let token = g
+        .token
+        .clone()
+        .or_else(|| env("WTOW_TOKEN"))
+        .or_else(|| prof.and_then(|p| p.token.clone()));
     let missing = |what: &str| -> ! {
-        fail(2, g.json, "UNAUTHENTICATED", &format!(
-            "missing {what}; run: wtow login --base-url <url> --project <slug> --token <token>"
-        ))
+        fail(
+            2,
+            g.json,
+            "UNAUTHENTICATED",
+            &format!(
+                "missing {what}; run: wtow login --base-url <url> --project <slug> --token <token>"
+            ),
+        )
     };
     Resolved {
-        base_url: base_url.unwrap_or_else(|| missing("base_url")).trim_end_matches('/').to_string(),
+        base_url: base_url
+            .unwrap_or_else(|| missing("base_url"))
+            .trim_end_matches('/')
+            .to_string(),
         project: project.unwrap_or_else(|| missing("project")),
         token: token.unwrap_or_else(|| missing("token")),
     }
 }
 
 fn version_lt(a: &str, b: &str) -> bool {
-    let parse = |s: &str| s.split('.').map(|p| p.parse::<u64>().unwrap_or(0)).collect::<Vec<_>>();
+    let parse = |s: &str| {
+        s.split('.')
+            .map(|p| p.parse::<u64>().unwrap_or(0))
+            .collect::<Vec<_>>()
+    };
     parse(a) < parse(b)
 }
 
@@ -375,7 +443,12 @@ impl Api {
             .user_agent(format!("wtow-cli/{VERSION}"))
             .build()
             .unwrap_or_else(|e| fail(5, g.json, "NETWORK", &e.to_string()));
-        let api = Api { http, r, json: g.json, idem: g.idempotency_key.clone() };
+        let api = Api {
+            http,
+            r,
+            json: g.json,
+            idem: g.idempotency_key.clone(),
+        };
         api.check_meta();
         api
     }
@@ -387,21 +460,39 @@ impl Api {
             .send()
             .and_then(|r| r.error_for_status())
             .and_then(|r| r.json())
-            .unwrap_or_else(|e| fail(5, self.json, "NETWORK", &format!("cannot reach {}: {e}", self.r.base_url)));
+            .unwrap_or_else(|e| {
+                fail(
+                    5,
+                    self.json,
+                    "NETWORK",
+                    &format!("cannot reach {}: {e}", self.r.base_url),
+                )
+            });
         if version_lt(VERSION, &meta.min_cli_version) {
-            fail(1, self.json, "CLI_TOO_OLD", &format!(
-                "wtow {VERSION} is older than required {}; upgrade: curl -fsSL {}/install.sh | sh",
-                meta.min_cli_version, self.r.base_url
-            ));
+            fail(
+                1,
+                self.json,
+                "CLI_TOO_OLD",
+                &format!(
+                    "wtow {VERSION} is older than required {}; upgrade: curl -fsSL {}/install.sh | sh",
+                    meta.min_cli_version, self.r.base_url
+                ),
+            );
         }
     }
 
     fn url(&self, path: &str) -> String {
-        format!("{}/api/v1/projects/{}{path}", self.r.base_url, self.r.project)
+        format!(
+            "{}/api/v1/projects/{}{path}",
+            self.r.base_url, self.r.project
+        )
     }
 
     fn req(&self, method: Method, path: &str) -> RequestBuilder {
-        let mut b = self.http.request(method.clone(), self.url(path)).bearer_auth(&self.r.token);
+        let mut b = self
+            .http
+            .request(method.clone(), self.url(path))
+            .bearer_auth(&self.r.token);
         if method == Method::POST {
             let key = self.idem.clone().unwrap_or_else(random_key);
             b = b.header("Idempotency-Key", key);
@@ -416,7 +507,9 @@ impl Api {
 
     /// 发送请求；非 2xx 时按错误信封输出并以对应退出码退出。
     fn checked(&self, b: RequestBuilder) -> Response {
-        let resp = b.send().unwrap_or_else(|e| fail(5, self.json, "NETWORK", &e.to_string()));
+        let resp = b
+            .send()
+            .unwrap_or_else(|e| fail(5, self.json, "NETWORK", &e.to_string()));
         let status = resp.status();
         if status.is_success() {
             return resp;
@@ -431,16 +524,30 @@ impl Api {
             Ok(env) => {
                 eprintln!("error [{}]: {}", env.error.code, env.error.message);
                 if !env.error.details.is_null() {
-                    eprintln!("{}", serde_json::to_string_pretty(&env.error.details).unwrap());
+                    eprintln!(
+                        "{}",
+                        serde_json::to_string_pretty(&env.error.details).unwrap()
+                    );
                 }
                 exit(code)
             }
-            Err(_) => fail(code, self.json, "HTTP", &format!("HTTP {status}: {}", text.chars().take(200).collect::<String>())),
+            Err(_) => fail(
+                code,
+                self.json,
+                "HTTP",
+                &format!(
+                    "HTTP {status}: {}",
+                    text.chars().take(200).collect::<String>()
+                ),
+            ),
         }
     }
 
     fn get(&self, path: &str, query: &[(&str, Option<String>)]) -> Value {
-        let q: Vec<(&str, String)> = query.iter().filter_map(|(k, v)| v.clone().map(|v| (*k, v))).collect();
+        let q: Vec<(&str, String)> = query
+            .iter()
+            .filter_map(|(k, v)| v.clone().map(|v| (*k, v)))
+            .collect();
         self.send(self.req(Method::GET, path).query(&q))
     }
 
@@ -452,10 +559,14 @@ impl Api {
         files
             .iter()
             .map(|f| {
-                let form = multipart::Form::new()
-                    .file("file", f)
-                    .unwrap_or_else(|e| fail(6, self.json, "VALIDATION", &format!("{}: {e}", f.display())));
-                let v = self.send(self.req(Method::POST, "/files").header("Idempotency-Key", random_key()).multipart(form));
+                let form = multipart::Form::new().file("file", f).unwrap_or_else(|e| {
+                    fail(6, self.json, "VALIDATION", &format!("{}: {e}", f.display()))
+                });
+                let v = self.send(
+                    self.req(Method::POST, "/files")
+                        .header("Idempotency-Key", random_key())
+                        .multipart(form),
+                );
                 v["id"].as_str().unwrap_or_default().to_string()
             })
             .collect()
@@ -474,7 +585,10 @@ impl Api {
         if let Err(e) = res {
             fail(1, self.json, "IO", &format!("{}: {e}", dest.display()));
         }
-        std::path::absolute(dest).unwrap_or_else(|_| dest.to_path_buf()).display().to_string()
+        std::path::absolute(dest)
+            .unwrap_or_else(|_| dest.to_path_buf())
+            .display()
+            .to_string()
     }
 
     /// 下载作文的全部附件，给每个附件补 local_path，并生成把 `](ATT-xxx)` 换成本地路径的 `<field>_local`。
@@ -517,19 +631,37 @@ fn attachments_root() -> PathBuf {
 fn safe_filename(name: &str) -> String {
     let s: String = name
         .chars()
-        .map(|c| if c.is_alphanumeric() || matches!(c, '.' | '-' | '_') { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || matches!(c, '.' | '-' | '_') {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     let s = s.trim_start_matches('.');
-    if s.is_empty() { "file".into() } else { s.into() }
+    if s.is_empty() {
+        "file".into()
+    } else {
+        s.into()
+    }
 }
 
 fn random_key() -> String {
-    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
     format!("cli-{nanos:x}-{:x}", std::process::id())
 }
 
 fn parse_priority(p: &str, json: bool) -> i64 {
-    match p.trim().to_uppercase().trim_start_matches('P').parse::<i64>() {
+    match p
+        .trim()
+        .to_uppercase()
+        .trim_start_matches('P')
+        .parse::<i64>()
+    {
         Ok(n @ 0..=3) => n,
         _ => fail(6, json, "VALIDATION", "priority must be P0-P3"),
     }
@@ -543,8 +675,14 @@ fn print(v: &Value, json: bool) {
     let line = |o: &Value| {
         let id = o["id"].as_str().unwrap_or("");
         let status = o["status"].as_str().unwrap_or("");
-        let title = o["title"].as_str().or(o["instruction"].as_str()).unwrap_or("");
-        format!("{id:<10} {status:<11} {}", title.lines().next().unwrap_or(""))
+        let title = o["title"]
+            .as_str()
+            .or(o["instruction"].as_str())
+            .unwrap_or("");
+        format!(
+            "{id:<10} {status:<11} {}",
+            title.lines().next().unwrap_or("")
+        )
     };
     match v {
         Value::Object(m) if m.contains_key("items") => {
@@ -569,7 +707,9 @@ fn main() {
     match &cli.cmd {
         Cmd::Login { profile } => login(g, profile.clone()),
         Cmd::Profile { cmd } => profile_cmd(g, cmd),
-        Cmd::Skill { cmd: SkillCmd::Install { scope, dir } } => skill_install(g, scope, dir.as_deref()),
+        Cmd::Skill {
+            cmd: SkillCmd::Install { scope, dir },
+        } => skill_install(g, scope, dir.as_deref()),
         Cmd::Whoami => {
             let api = Api::new(resolve(g), g);
             print(&api.get("/whoami", &[]), g.json);
@@ -582,28 +722,47 @@ fn main() {
             let api = Api::new(resolve(g), g);
             print(&exec_cmd(&api, cmd), g.json);
         }
-        Cmd::File { cmd: FileCmd::Get { id, output } } => {
+        Cmd::File {
+            cmd: FileCmd::Get { id, output },
+        } => {
             let api = Api::new(resolve(g), g);
-            let dest = output.clone().unwrap_or_else(|| attachments_root().join(id));
-            print(&json!({ "id": id, "local_path": api.download(id, &dest) }), g.json);
+            let dest = output
+                .clone()
+                .unwrap_or_else(|| attachments_root().join(id));
+            print(
+                &json!({ "id": id, "local_path": api.download(id, &dest) }),
+                g.json,
+            );
         }
     }
 }
 
 fn login(g: &Global, profile: Option<String>) {
     let (Some(base_url), Some(project), Some(token)) = (&g.base_url, &g.project, &g.token) else {
-        fail(6, g.json, "VALIDATION", "usage: wtow login --base-url <url> --project <slug> --token <token>")
+        fail(
+            6,
+            g.json,
+            "VALIDATION",
+            "usage: wtow login --base-url <url> --project <slug> --token <token>",
+        )
     };
-    let r = Resolved { base_url: base_url.trim_end_matches('/').into(), project: project.clone(), token: token.clone() };
+    let r = Resolved {
+        base_url: base_url.trim_end_matches('/').into(),
+        project: project.clone(),
+        token: token.clone(),
+    };
     let api = Api::new(r, g);
     let me = api.get("/whoami", &[]);
     let name = profile.unwrap_or_else(|| project.clone());
     let mut cfg = load_user_config();
-    cfg.profiles.insert(name.clone(), Profile {
-        base_url: Some(api.r.base_url.clone()),
-        project: Some(project.clone()),
-        token: Some(token.clone()),
-    });
+    cfg.profiles.insert(
+        name.clone(),
+        Profile {
+            base_url: Some(api.r.base_url.clone()),
+            project: Some(project.clone()),
+            token: Some(token.clone()),
+        },
+    );
     cfg.active = Some(name.clone());
     save_user_config(&cfg, g.json);
     print(&json!({ "profile": name, "whoami": me }), g.json);
@@ -616,17 +775,28 @@ fn profile_cmd(g: &Global, cmd: &ProfileCmd) {
             let items: Vec<Value> = cfg
                 .profiles
                 .iter()
-                .map(|(n, p)| json!({
-                    "name": n, "base_url": p.base_url, "project": p.project,
-                    "active": cfg.active.as_deref() == Some(n.as_str()),
-                }))
+                .map(|(n, p)| {
+                    json!({
+                        "name": n, "base_url": p.base_url, "project": p.project,
+                        "active": cfg.active.as_deref() == Some(n.as_str()),
+                    })
+                })
                 .collect();
             if g.json {
                 println!("{}", Value::Array(items));
             } else {
                 for i in items {
-                    let mark = if i["active"].as_bool() == Some(true) { "*" } else { " " };
-                    println!("{mark} {:<16} {} {}", i["name"].as_str().unwrap(), i["project"].as_str().unwrap_or(""), i["base_url"].as_str().unwrap_or(""));
+                    let mark = if i["active"].as_bool() == Some(true) {
+                        "*"
+                    } else {
+                        " "
+                    };
+                    println!(
+                        "{mark} {:<16} {} {}",
+                        i["name"].as_str().unwrap(),
+                        i["project"].as_str().unwrap_or(""),
+                        i["base_url"].as_str().unwrap_or("")
+                    );
                 }
             }
         }
@@ -642,7 +812,10 @@ fn profile_cmd(g: &Global, cmd: &ProfileCmd) {
 }
 
 fn skill_install(g: &Global, scope: &str, dir: Option<&Path>) {
-    let home = || dirs::home_dir().unwrap_or_else(|| fail(1, g.json, "CONFIG", "cannot locate home directory"));
+    let home = || {
+        dirs::home_dir()
+            .unwrap_or_else(|| fail(1, g.json, "CONFIG", "cannot locate home directory"))
+    };
     let root = match dir {
         // 引号包住或 PowerShell 下 `~` 不会被 shell 展开，这里补上。
         Some(d) => match d.strip_prefix("~") {
@@ -655,12 +828,16 @@ fn skill_install(g: &Global, scope: &str, dir: Option<&Path>) {
     };
     for (rel, content) in SKILL_FILES {
         let p = root.join(rel);
-        let res = std::fs::create_dir_all(p.parent().unwrap()).and_then(|_| std::fs::write(&p, content));
+        let res =
+            std::fs::create_dir_all(p.parent().unwrap()).and_then(|_| std::fs::write(&p, content));
         if let Err(e) = res {
             fail(1, g.json, "IO", &format!("{}: {e}", p.display()));
         }
     }
-    print(&json!({ "installed": root.display().to_string(), "files": SKILL_FILES.len() }), g.json);
+    print(
+        &json!({ "installed": root.display().to_string(), "files": SKILL_FILES.len() }),
+        g.json,
+    );
 }
 
 fn raw_cmd(api: &Api, cmd: &RawCmd) -> Value {
@@ -712,24 +889,46 @@ fn raw_cmd(api: &Api, cmd: &RawCmd) -> Value {
 
 fn exec_cmd(api: &Api, cmd: &ExecCmd) -> Value {
     match cmd {
-        ExecCmd::Create { from, instruction, targets, priority, developer, close, skip_related_check, attach } => {
+        ExecCmd::Create {
+            from,
+            instruction,
+            targets,
+            priority,
+            developer,
+            close,
+            skip_related_check,
+            attach,
+        } => {
             let priority = priority.as_deref().map(|p| parse_priority(p, api.json));
             let ids = api.upload(attach);
             let instruction = link_uploads(instruction, attach, &ids);
-            api.post("/exec", json!({
-                "source_raw_ids": from, "instruction": instruction, "target_resources": targets,
-                "priority": priority, "developer_id": developer, "close_sources": close,
-                "skip_related_check": skip_related_check, "attachment_ids": ids,
-            }))
+            api.post(
+                "/exec",
+                json!({
+                    "source_raw_ids": from, "instruction": instruction, "target_resources": targets,
+                    "priority": priority, "developer_id": developer, "close_sources": close,
+                    "skip_related_check": skip_related_check, "attachment_ids": ids,
+                }),
+            )
         }
-        ExecCmd::List { status, developer, target, q, page, page_size } => api.get("/exec", &[
-            ("status", status.clone()),
-            ("developer_id", developer.map(|d| d.to_string())),
-            ("target", target.clone()),
-            ("q", q.clone()),
-            ("page", page.map(|p| p.to_string())),
-            ("page_size", page_size.map(|p| p.to_string())),
-        ]),
+        ExecCmd::List {
+            status,
+            developer,
+            target,
+            q,
+            page,
+            page_size,
+        } => api.get(
+            "/exec",
+            &[
+                ("status", status.clone()),
+                ("developer_id", developer.map(|d| d.to_string())),
+                ("target", target.clone()),
+                ("q", q.clone()),
+                ("page", page.map(|p| p.to_string())),
+                ("page_size", page_size.map(|p| p.to_string())),
+            ],
+        ),
         ExecCmd::Get { id, download } => {
             let v = api.get(&format!("/exec/{id}"), &[]);
             match download {
@@ -739,22 +938,41 @@ fn exec_cmd(api: &Api, cmd: &ExecCmd) -> Value {
         }
         ExecCmd::Raws { id } => api.get(&format!("/exec/{id}/raws"), &[]),
         ExecCmd::Claim { id, force } => {
-            let path = if *force { format!("/exec/{id}/claim?force=true") } else { format!("/exec/{id}/claim") };
+            let path = if *force {
+                format!("/exec/{id}/claim?force=true")
+            } else {
+                format!("/exec/{id}/claim")
+            };
             api.post(&path, json!({}))
         }
-        ExecCmd::Release { id, reason } => {
-            api.send(api.req(Method::DELETE, &format!("/exec/{id}/claim")).json(&json!({ "reason": reason })))
-        }
-        ExecCmd::Cancel { id, reason, no_requeue } => api.post(
+        ExecCmd::Release { id, reason } => api.send(
+            api.req(Method::DELETE, &format!("/exec/{id}/claim"))
+                .json(&json!({ "reason": reason })),
+        ),
+        ExecCmd::Cancel {
+            id,
+            reason,
+            no_requeue,
+        } => api.post(
             &format!("/exec/{id}/cancel"),
             json!({ "reason": reason, "requeue_sources": !no_requeue }),
         ),
-        ExecCmd::Reopen { id, reason } => api.post(&format!("/exec/{id}/reopen"), json!({ "reason": reason })),
+        ExecCmd::Reopen { id, reason } => {
+            api.post(&format!("/exec/{id}/reopen"), json!({ "reason": reason }))
+        }
         ExecCmd::Complete { id, notes, links } => api.post(
             &format!("/exec/{id}/complete"),
             json!({ "developer_notes": notes, "result_links": links }),
         ),
-        ExecCmd::Edit { id, instruction, priority, targets, notes, links, if_match } => {
+        ExecCmd::Edit {
+            id,
+            instruction,
+            priority,
+            targets,
+            notes,
+            links,
+            if_match,
+        } => {
             let priority = priority.as_deref().map(|p| parse_priority(p, api.json));
             let mut b = api.req(Method::PATCH, &format!("/exec/{id}")).json(&json!({
                 "instruction": instruction, "priority": priority, "target_resources": targets,

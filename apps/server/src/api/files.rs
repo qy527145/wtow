@@ -1,24 +1,24 @@
-use std::path::PathBuf;
-
-use axum::extract::{Multipart, Path, State};
-use axum::http::{header, StatusCode};
-use axum::response::IntoResponse;
 use axum::Json;
+use axum::extract::{Multipart, Path, State};
+use axum::http::{StatusCode, header};
+use axum::response::IntoResponse;
 use chrono::{Datelike, Utc};
 use contract::dto::Attachment;
 use sqlx::{Postgres, Row, Transaction};
 
-use crate::app::AppState;
-use crate::auth::{random_hex, ProjectCtx};
+use crate::auth::{ProjectCtx, random_hex};
 use crate::error::{AppError, AppResult};
+use crate::state::AppState;
 
 pub const MAX_BYTES: usize = 20 * 1024 * 1024;
-const ALLOWED: &[&str] =
-    &["image/png", "image/jpeg", "image/gif", "text/plain", "application/json", "application/zip"];
-
-pub fn root() -> PathBuf {
-    std::env::var("WTOW_ATTACHMENT_DIR").unwrap_or_else(|_| "./data/attachments".into()).into()
-}
+const ALLOWED: &[&str] = &[
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "text/plain",
+    "application/json",
+    "application/zip",
+];
 
 fn sniff(data: &[u8]) -> Option<&'static str> {
     if let Some(t) = infer::get(data) {
@@ -49,7 +49,10 @@ pub async fn upload(
         .map(|f| f.rsplit(['/', '\\']).next().unwrap_or(f).to_string())
         .filter(|f| !f.is_empty())
         .unwrap_or_else(|| "file".into());
-    let data = field.bytes().await.map_err(|e| AppError::validation(format!("upload failed: {e}")))?;
+    let data = field
+        .bytes()
+        .await
+        .map_err(|e| AppError::validation(format!("upload failed: {e}")))?;
     if data.is_empty() || data.len() > MAX_BYTES {
         return Err(AppError::validation("file must be 1 byte to 20MB"));
     }
@@ -57,12 +60,20 @@ pub async fn upload(
 
     let id = format!("ATT-{}", random_hex(12));
     let now = Utc::now();
-    let key = format!("{}/{:04}/{:02}/{}", ctx.project_id, now.year(), now.month(), random_hex(16));
-    let path = root().join(&key);
+    let key = format!(
+        "{}/{:04}/{:02}/{}",
+        ctx.project_id,
+        now.year(),
+        now.month(),
+        random_hex(16)
+    );
+    let path = st.config.attachment_dir.join(&key);
     tokio::fs::create_dir_all(path.parent().unwrap())
         .await
         .map_err(|e| AppError::internal(format!("mkdir: {e}")))?;
-    tokio::fs::write(&path, &data).await.map_err(|e| AppError::internal(format!("write: {e}")))?;
+    tokio::fs::write(&path, &data)
+        .await
+        .map_err(|e| AppError::internal(format!("write: {e}")))?;
 
     sqlx::query(
         "INSERT INTO attachments (id, project_id, filename, mime, size_bytes, storage_key, uploaded_by)
@@ -78,7 +89,16 @@ pub async fn upload(
     .execute(&st.db)
     .await?;
 
-    Ok((StatusCode::CREATED, Json(Attachment { id, filename, mime: mime.into(), size_bytes: data.len() as i64, owner_id: None })))
+    Ok((
+        StatusCode::CREATED,
+        Json(Attachment {
+            id,
+            filename,
+            mime: mime.into(),
+            size_bytes: data.len() as i64,
+            owner_id: None,
+        }),
+    ))
 }
 
 #[derive(Debug, Default, serde::Deserialize)]
@@ -95,22 +115,36 @@ pub async fn download(
     Path((_, id)): Path<(String, String)>,
     axum::extract::Query(q): axum::extract::Query<DownloadQuery>,
 ) -> AppResult<impl IntoResponse> {
-    let row = sqlx::query("SELECT filename, mime, storage_key FROM attachments WHERE project_id = $1 AND id = $2")
-        .bind(ctx.project_id)
-        .bind(&id)
-        .fetch_optional(&st.db)
-        .await?
-        .ok_or_else(|| AppError::not_found(format!("file {id}")))?;
+    let row = sqlx::query(
+        "SELECT filename, mime, storage_key FROM attachments WHERE project_id = $1 AND id = $2",
+    )
+    .bind(ctx.project_id)
+    .bind(&id)
+    .fetch_optional(&st.db)
+    .await?
+    .ok_or_else(|| AppError::not_found(format!("file {id}")))?;
     let key: String = row.get("storage_key");
-    let data = tokio::fs::read(root().join(key)).await.map_err(|_| AppError::not_found(format!("file {id}")))?;
+    let data = tokio::fs::read(st.config.attachment_dir.join(key))
+        .await
+        .map_err(|_| AppError::not_found(format!("file {id}")))?;
     let filename: String = row.get("filename");
-    let safe: String = filename.chars().filter(|c| c.is_ascii_graphic() && *c != '"' || *c == ' ').collect();
+    let safe: String = filename
+        .chars()
+        .filter(|c| c.is_ascii_graphic() && *c != '"' || *c == ' ')
+        .collect();
     let mime: String = row.get("mime");
-    let disposition = if mime.starts_with("image/") && !q.download { "inline" } else { "attachment" };
+    let disposition = if mime.starts_with("image/") && !q.download {
+        "inline"
+    } else {
+        "attachment"
+    };
     Ok((
         [
             (header::CONTENT_TYPE, mime),
-            (header::CONTENT_DISPOSITION, format!("{disposition}; filename=\"{safe}\"")),
+            (
+                header::CONTENT_DISPOSITION,
+                format!("{disposition}; filename=\"{safe}\""),
+            ),
             (header::X_CONTENT_TYPE_OPTIONS, "nosniff".to_string()),
             (header::CACHE_CONTROL, "private, max-age=3600".to_string()),
         ],
@@ -172,7 +206,9 @@ pub async fn bind(
     .await?
     .rows_affected();
     if n as usize != ids.len() {
-        return Err(AppError::validation("some attachments are missing, already bound, or not yours"));
+        return Err(AppError::validation(
+            "some attachments are missing, already bound, or not yours",
+        ));
     }
     Ok(())
 }
@@ -209,4 +245,15 @@ pub async fn check_refs(
         )));
     }
     Ok(())
+}
+
+/// 附件上传与下载。上传单独放宽 body 上限，其余接口保持 axum 默认的 2MB。
+pub fn router() -> axum::Router<AppState> {
+    use axum::routing::{get, post};
+    axum::Router::new()
+        .route(
+            "/projects/{slug}/files",
+            post(upload).layer(axum::extract::DefaultBodyLimit::max(MAX_BYTES + 64 * 1024)),
+        )
+        .route("/projects/{slug}/files/{id}", get(download))
 }

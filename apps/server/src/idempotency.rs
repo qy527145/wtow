@@ -1,4 +1,4 @@
-use axum::body::{to_bytes, Body};
+use axum::body::{Body, to_bytes};
 use axum::extract::{FromRequestParts, RawPathParams, Request, State};
 use axum::http::{Method, StatusCode};
 use axum::middleware::Next;
@@ -6,21 +6,27 @@ use axum::response::{IntoResponse, Response};
 use contract::error as code;
 use sqlx::Row;
 
-use crate::app::AppState;
 use crate::auth::UserCtx;
-use sha2::{Digest, Sha256};
 use crate::error::{AppError, AppResult};
+use crate::state::AppState;
+use sha2::{Digest, Sha256};
 
 const MAX_BODY: usize = 21 * 1024 * 1024;
 
 /// 见 DESIGN 7.4。占位与业务写入不在同一事务：业务失败（5xx）时删除占位，允许重试。
 pub async fn layer(State(st): State<AppState>, req: Request, next: Next) -> AppResult<Response> {
-    let key = match req.headers().get("idempotency-key").and_then(|v| v.to_str().ok()) {
+    let key = match req
+        .headers()
+        .get("idempotency-key")
+        .and_then(|v| v.to_str().ok())
+    {
         Some(k) if req.method() == Method::POST && !k.trim().is_empty() => k.trim().to_string(),
         _ => return Ok(next.run(req).await),
     };
     if key.len() > 128 {
-        return Err(AppError::validation("Idempotency-Key must be at most 128 characters"));
+        return Err(AppError::validation(
+            "Idempotency-Key must be at most 128 characters",
+        ));
     }
 
     let (mut parts, body) = req.into_parts();
@@ -28,19 +34,26 @@ pub async fn layer(State(st): State<AppState>, req: Request, next: Next) -> AppR
     let slug = RawPathParams::from_request_parts(&mut parts, &st)
         .await
         .ok()
-        .and_then(|p| p.iter().find(|(k, _)| *k == "slug").map(|(_, v)| v.to_string()));
+        .and_then(|p| {
+            p.iter()
+                .find(|(k, _)| *k == "slug")
+                .map(|(_, v)| v.to_string())
+        });
     let Some(slug) = slug else {
         return Ok(next.run(Request::from_parts(parts, body)).await);
     };
-    let Some(project_id): Option<i64> = sqlx::query_scalar("SELECT id FROM projects WHERE slug = $1")
-        .bind(&slug)
-        .fetch_optional(&st.db)
-        .await?
+    let Some(project_id): Option<i64> =
+        sqlx::query_scalar("SELECT id FROM projects WHERE slug = $1")
+            .bind(&slug)
+            .fetch_optional(&st.db)
+            .await?
     else {
         return Ok(next.run(Request::from_parts(parts, body)).await);
     };
 
-    let bytes = to_bytes(body, MAX_BODY).await.map_err(|_| AppError::validation("request body too large"))?;
+    let bytes = to_bytes(body, MAX_BODY)
+        .await
+        .map_err(|_| AppError::validation("request body too large"))?;
     let endpoint = parts.uri.path().to_string();
     let mut material = endpoint.clone().into_bytes();
     material.push(0);
@@ -73,7 +86,9 @@ pub async fn layer(State(st): State<AppState>, req: Request, next: Next) -> AppR
         .bind(&key)
         .fetch_one(&st.db)
         .await?;
-        if row.get::<String, _>("endpoint") != endpoint || row.get::<Vec<u8>, _>("request_hash") != hash {
+        if row.get::<String, _>("endpoint") != endpoint
+            || row.get::<Vec<u8>, _>("request_hash") != hash
+        {
             return Err(AppError::new(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 code::IDEMPOTENCY_KEY_REUSED,
@@ -83,29 +98,42 @@ pub async fn layer(State(st): State<AppState>, req: Request, next: Next) -> AppR
         return match row.get::<Option<i16>, _>("status_code") {
             Some(s) => {
                 let status = StatusCode::from_u16(s as u16).unwrap_or(StatusCode::OK);
-                let body: serde_json::Value = row.get::<Option<serde_json::Value>, _>("response").unwrap_or_default();
+                let body: serde_json::Value = row
+                    .get::<Option<serde_json::Value>, _>("response")
+                    .unwrap_or_default();
                 let mut resp = (status, axum::Json(body)).into_response();
-                resp.headers_mut().insert("idempotent-replay", "true".parse().unwrap());
+                resp.headers_mut()
+                    .insert("idempotent-replay", "true".parse().unwrap());
                 Ok(resp)
             }
-            None => Err(AppError::conflict(code::IDEMPOTENCY_IN_PROGRESS, "a request with this key is in progress")),
+            None => Err(AppError::conflict(
+                code::IDEMPOTENCY_IN_PROGRESS,
+                "a request with this key is in progress",
+            )),
         };
     }
 
-    let resp = next.run(Request::from_parts(parts, Body::from(bytes))).await;
+    let resp = next
+        .run(Request::from_parts(parts, Body::from(bytes)))
+        .await;
     let status = resp.status();
     if status.is_server_error() {
-        sqlx::query("DELETE FROM idempotency_keys WHERE project_id = $1 AND user_id = $2 AND key = $3")
-            .bind(project_id)
-            .bind(user.user_id)
-            .bind(&key)
-            .execute(&st.db)
-            .await?;
+        sqlx::query(
+            "DELETE FROM idempotency_keys WHERE project_id = $1 AND user_id = $2 AND key = $3",
+        )
+        .bind(project_id)
+        .bind(user.user_id)
+        .bind(&key)
+        .execute(&st.db)
+        .await?;
         return Ok(resp);
     }
     let (rparts, rbody) = resp.into_parts();
-    let rbytes = to_bytes(rbody, MAX_BODY).await.map_err(|e| AppError::internal(format!("read response: {e}")))?;
-    let json: serde_json::Value = serde_json::from_slice(&rbytes).unwrap_or(serde_json::Value::Null);
+    let rbytes = to_bytes(rbody, MAX_BODY)
+        .await
+        .map_err(|e| AppError::internal(format!("read response: {e}")))?;
+    let json: serde_json::Value =
+        serde_json::from_slice(&rbytes).unwrap_or(serde_json::Value::Null);
     sqlx::query(
         "UPDATE idempotency_keys SET response = $4, status_code = $5
           WHERE project_id = $1 AND user_id = $2 AND key = $3",
@@ -137,7 +165,9 @@ pub async fn release_stale_claims(st: AppState) {
         .execute(&st.db)
         .await;
         match r {
-            Ok(r) if r.rows_affected() > 0 => tracing::info!(released = r.rows_affected(), "released stale claims"),
+            Ok(r) if r.rows_affected() > 0 => {
+                tracing::info!(released = r.rows_affected(), "released stale claims")
+            }
             Ok(_) => {}
             Err(e) => tracing::error!(error = %e, "release stale claims failed"),
         }

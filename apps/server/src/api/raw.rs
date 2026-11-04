@@ -1,6 +1,6 @@
-use axum::extract::{Path, Query, State};
-use axum::http::{header, HeaderMap, StatusCode};
 use axum::Json;
+use axum::extract::{Path, Query, State};
+use axum::http::{HeaderMap, StatusCode, header};
 use contract::dto::{
     ActorType, Delivery, ListRawQuery, Page, PatchRawReq, RawComposition, RawStatus, ReasonReq,
     RelatedItem, Role, SubmitRawReq, TriageReq,
@@ -10,10 +10,10 @@ use serde_json::json;
 use sqlx::postgres::PgRow;
 use sqlx::{Postgres, Row, Transaction};
 
-use crate::app::AppState;
+use crate::api::files;
 use crate::auth::ProjectCtx;
 use crate::error::{AppError, AppResult};
-use crate::routes::files;
+use crate::state::AppState;
 
 const RAW_COLS: &str = "r.id, r.title, r.description, r.tags, r.status::text AS status, r.reporter_id,
     r.claimed_by, r.claimed_at, r.merged_into_id, r.triage_reason, r.version, r.created_at, r.updated_at,
@@ -72,7 +72,11 @@ fn raw_from_row(row: &PgRow) -> RawComposition {
     }
 }
 
-pub async fn next_id(tx: &mut Transaction<'_, Postgres>, project_id: i64, kind: &str) -> AppResult<(String, i64)> {
+pub async fn next_id(
+    tx: &mut Transaction<'_, Postgres>,
+    project_id: i64,
+    kind: &str,
+) -> AppResult<(String, i64)> {
     let seq: i64 = sqlx::query_scalar(
         "INSERT INTO project_counters (project_id, kind, next_seq) VALUES ($1, $2, 1000)
          ON CONFLICT (project_id, kind) DO UPDATE SET next_seq = project_counters.next_seq + 1
@@ -117,7 +121,10 @@ pub async fn audit(
 fn ensure_writable(ctx: &ProjectCtx) -> AppResult<()> {
     ctx.require_write()?;
     if ctx.archived {
-        return Err(AppError::conflict(code::INVALID_TRANSITION, "project is archived"));
+        return Err(AppError::conflict(
+            code::INVALID_TRANSITION,
+            "project is archived",
+        ));
     }
     Ok(())
 }
@@ -173,7 +180,13 @@ pub async fn submit(
     .await?;
 
     files::bind(&mut tx, &ctx, &req.attachment_ids, "raw", &id).await?;
-    files::check_refs(&mut tx, ctx.project_id, &req.description, &[("raw", &[id.clone()])]).await?;
+    files::check_refs(
+        &mut tx,
+        ctx.project_id,
+        &req.description,
+        &[("raw", std::slice::from_ref(&id))],
+    )
+    .await?;
     audit(&mut tx, &ctx, "raw.submit", "raw", &id, json!({})).await?;
     tx.commit().await?;
     Ok((StatusCode::CREATED, Json(load(&st, &ctx, &id).await?)))
@@ -193,17 +206,23 @@ pub async fn list(
         AND ($5::bigint IS NULL OR r.reporter_id = $5)";
     let status = q.status.map(status_str);
     let tag = q.tag.as_deref().map(|t| t.trim().to_lowercase());
-    let kw = q.q.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(escape_like);
+    let kw =
+        q.q.as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(escape_like);
     let mine = q.mine.unwrap_or(false).then_some(ctx.user_id);
 
-    let total: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT count(*) FROM raw_compositions r WHERE {filter}")))
-        .bind(ctx.project_id)
-        .bind(status)
-        .bind(&tag)
-        .bind(&kw)
-        .bind(mine)
-        .fetch_one(&st.db)
-        .await?;
+    let total: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "SELECT count(*) FROM raw_compositions r WHERE {filter}"
+    )))
+    .bind(ctx.project_id)
+    .bind(status)
+    .bind(&tag)
+    .bind(&kw)
+    .bind(mine)
+    .fetch_one(&st.db)
+    .await?;
     let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT {RAW_COLS} FROM raw_compositions r WHERE {filter}
           ORDER BY r.created_at DESC LIMIT $6 OFFSET $7"
@@ -221,7 +240,10 @@ pub async fn list(
     // 一次查出整页的附件，看板卡片据此显示「有图」。
     let ids: Vec<String> = items.iter().map(|r| r.id.clone()).collect();
     for a in files::list_owned(&st, ctx.project_id, "raw", &ids).await? {
-        if let Some(r) = items.iter_mut().find(|r| Some(&r.id) == a.owner_id.as_ref()) {
+        if let Some(r) = items
+            .iter_mut()
+            .find(|r| Some(&r.id) == a.owner_id.as_ref())
+        {
             r.attachments.push(a);
         }
     }
@@ -229,7 +251,9 @@ pub async fn list(
 }
 
 fn escape_like(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")
+    s.replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
 }
 
 pub async fn get(
@@ -273,10 +297,18 @@ pub async fn claim(
         let status: String = cur.get("status");
         if status == "Claimed" {
             let at: Option<chrono::DateTime<chrono::Utc>> = cur.get("claimed_at");
-            return Err(AppError::conflict(code::RAW_ALREADY_CLAIMED, format!("{id} is already claimed"))
-                .with_details(json!({ "claimed_by": cur.get::<Option<i64>, _>("claimed_by"), "claimed_at": at })));
+            return Err(AppError::conflict(
+                code::RAW_ALREADY_CLAIMED,
+                format!("{id} is already claimed"),
+            )
+            .with_details(
+                json!({ "claimed_by": cur.get::<Option<i64>, _>("claimed_by"), "claimed_at": at }),
+            ));
         }
-        return Err(AppError::conflict(code::INVALID_TRANSITION, format!("cannot claim {id} in status {status}")));
+        return Err(AppError::conflict(
+            code::INVALID_TRANSITION,
+            format!("cannot claim {id} in status {status}"),
+        ));
     }
     audit(&mut tx, &ctx, "raw.claim", "raw", &id, json!({})).await?;
     tx.commit().await?;
@@ -302,10 +334,16 @@ pub async fn release(
     .ok_or_else(|| AppError::not_found(format!("raw {id}")))?;
     let status: String = cur.get("status");
     if status != "Claimed" {
-        return Err(AppError::conflict(code::INVALID_TRANSITION, format!("cannot release {id} in status {status}")));
+        return Err(AppError::conflict(
+            code::INVALID_TRANSITION,
+            format!("cannot release {id} in status {status}"),
+        ));
     }
     if cur.get::<Option<i64>, _>("claimed_by") != Some(ctx.user_id) && !ctx.roles.has(Role::Admin) {
-        return Err(AppError::conflict(code::RAW_NOT_CLAIMED_BY_YOU, format!("{id} is claimed by someone else")));
+        return Err(AppError::conflict(
+            code::RAW_NOT_CLAIMED_BY_YOU,
+            format!("{id} is claimed by someone else"),
+        ));
     }
     sqlx::query(
         "UPDATE raw_compositions r
@@ -325,7 +363,11 @@ pub async fn release(
     Ok(Json(load(&st, &ctx, &id).await?))
 }
 
-async fn lock_raw(tx: &mut Transaction<'_, Postgres>, ctx: &ProjectCtx, id: &str) -> AppResult<(String, Option<i64>, Option<chrono::DateTime<chrono::Utc>>)> {
+async fn lock_raw(
+    tx: &mut Transaction<'_, Postgres>,
+    ctx: &ProjectCtx,
+    id: &str,
+) -> AppResult<(String, Option<i64>, Option<chrono::DateTime<chrono::Utc>>)> {
     let row = sqlx::query(
         "SELECT status::text AS status, claimed_by, claimed_at FROM raw_compositions
           WHERE project_id = $1 AND id = $2 FOR UPDATE",
@@ -335,7 +377,11 @@ async fn lock_raw(tx: &mut Transaction<'_, Postgres>, ctx: &ProjectCtx, id: &str
     .fetch_optional(&mut **tx)
     .await?
     .ok_or_else(|| AppError::not_found(format!("raw {id}")))?;
-    Ok((row.get("status"), row.get("claimed_by"), row.get("claimed_at")))
+    Ok((
+        row.get("status"),
+        row.get("claimed_by"),
+        row.get("claimed_at"),
+    ))
 }
 
 /// 本次认领期内调用过 related 才允许建联或合并，见 DESIGN 13。
@@ -373,7 +419,10 @@ fn ensure_triage_allowed(ctx: &ProjectCtx) -> AppResult<()> {
     ctx.require(Role::Assigner)?;
     ensure_writable(ctx)?;
     if ctx.require_human_triage && ctx.actor_type == ActorType::Agent {
-        return Err(AppError::forbidden(code::HUMAN_TRIAGE_REQUIRED, "this project requires a human for triage"));
+        return Err(AppError::forbidden(
+            code::HUMAN_TRIAGE_REQUIRED,
+            "this project requires a human for triage",
+        ));
     }
     Ok(())
 }
@@ -457,14 +506,17 @@ pub async fn patch(
     ctx.require(Role::Assigner)?;
     ensure_writable(&ctx)?;
     let if_match = if_match(&headers)?;
-    if let Some(t) = &req.title {
-        if t.trim().is_empty() || t.trim().chars().count() > 200 {
-            return Err(AppError::validation("title must be 1-200 characters"));
-        }
+    if let Some(t) = &req.title
+        && (t.trim().is_empty() || t.trim().chars().count() > 200)
+    {
+        return Err(AppError::validation("title must be 1-200 characters"));
     }
-    let tags: Option<Vec<String>> = req
-        .tags
-        .map(|v| v.iter().map(|t| t.trim().to_lowercase()).filter(|t| !t.is_empty()).collect());
+    let tags: Option<Vec<String>> = req.tags.map(|v| {
+        v.iter()
+            .map(|t| t.trim().to_lowercase())
+            .filter(|t| !t.is_empty())
+            .collect()
+    });
     let mut tx = st.db.begin().await?;
     let n = sqlx::query(
         "UPDATE raw_compositions SET
@@ -485,10 +537,19 @@ pub async fn patch(
     .rows_affected();
     if n == 0 {
         lock_raw(&mut tx, &ctx, &id).await?;
-        return Err(AppError::conflict(code::VERSION_CONFLICT, format!("{id} was modified by someone else")));
+        return Err(AppError::conflict(
+            code::VERSION_CONFLICT,
+            format!("{id} was modified by someone else"),
+        ));
     }
     if let Some(d) = &req.description {
-        files::check_refs(&mut tx, ctx.project_id, d, &[("raw", &[id.clone()])]).await?;
+        files::check_refs(
+            &mut tx,
+            ctx.project_id,
+            d,
+            &[("raw", std::slice::from_ref(&id))],
+        )
+        .await?;
     }
     audit(&mut tx, &ctx, "raw.patch", "raw", &id, json!({})).await?;
     tx.commit().await?;
@@ -563,9 +624,17 @@ async fn triage(
         "Pending" => {}
         "Claimed" if claimed_by == Some(ctx.user_id) => {}
         "Claimed" => {
-            return Err(AppError::conflict(code::RAW_NOT_CLAIMED_BY_YOU, format!("{id} is claimed by someone else")))
+            return Err(AppError::conflict(
+                code::RAW_NOT_CLAIMED_BY_YOU,
+                format!("{id} is claimed by someone else"),
+            ));
         }
-        s => return Err(AppError::conflict(code::INVALID_TRANSITION, format!("cannot triage {id} in status {s}"))),
+        s => {
+            return Err(AppError::conflict(
+                code::INVALID_TRANSITION,
+                format!("cannot triage {id} in status {s}"),
+            ));
+        }
     }
     if to != RawStatus::Ignored {
         ensure_related_checked(&mut tx, ctx, id, claimed_at, req.skip_related_check).await?;
@@ -625,7 +694,9 @@ pub async fn duplicate(
     Path((_, id)): Path<(String, String)>,
     Json(req): Json<TriageReq>,
 ) -> AppResult<Json<RawComposition>> {
-    Ok(Json(triage(&st, &ctx, &id, RawStatus::Duplicate, req).await?))
+    Ok(Json(
+        triage(&st, &ctx, &id, RawStatus::Duplicate, req).await?,
+    ))
 }
 
 pub async fn ignore(
@@ -651,8 +722,14 @@ pub async fn reopen(
     }
     let mut tx = st.db.begin().await?;
     let (status, _, _) = lock_raw(&mut tx, &ctx, &id).await?;
-    if !matches!(status.as_str(), "Merged" | "Duplicate" | "Ignored" | "Processed") {
-        return Err(AppError::conflict(code::INVALID_TRANSITION, format!("cannot reopen {id} in status {status}")));
+    if !matches!(
+        status.as_str(),
+        "Merged" | "Duplicate" | "Ignored" | "Processed"
+    ) {
+        return Err(AppError::conflict(
+            code::INVALID_TRANSITION,
+            format!("cannot reopen {id} in status {status}"),
+        ));
     }
     sqlx::query(
         "UPDATE raw_compositions
@@ -664,7 +741,32 @@ pub async fn reopen(
     .bind(&id)
     .execute(&mut *tx)
     .await?;
-    audit(&mut tx, &ctx, "raw.reopen", "raw", &id, json!({ "from": status, "reason": reason })).await?;
+    audit(
+        &mut tx,
+        &ctx,
+        "raw.reopen",
+        "raw",
+        &id,
+        json!({ "from": status, "reason": reason }),
+    )
+    .await?;
     tx.commit().await?;
     Ok(Json(load(&st, &ctx, &id).await?))
+}
+
+/// 原始作文管道。`/raw/{id}/execs` 在 exec 模块里，因为它返回执行作文。
+pub fn router() -> axum::Router<AppState> {
+    use axum::routing::{get, post};
+    axum::Router::new()
+        .route("/projects/{slug}/raw", get(list).post(submit))
+        .route("/projects/{slug}/raw/{id}", get(self::get).patch(patch))
+        .route("/projects/{slug}/raw/{id}/related", get(related))
+        .route("/projects/{slug}/raw/{id}/merge", post(merge))
+        .route("/projects/{slug}/raw/{id}/duplicate", post(duplicate))
+        .route("/projects/{slug}/raw/{id}/ignore", post(ignore))
+        .route("/projects/{slug}/raw/{id}/reopen", post(reopen))
+        .route(
+            "/projects/{slug}/raw/{id}/claim",
+            post(claim).delete(release),
+        )
 }

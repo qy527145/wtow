@@ -2,15 +2,15 @@ use std::collections::HashSet;
 
 use axum::extract::{FromRequestParts, RawPathParams};
 use axum::http::request::Parts;
-use axum::http::{header, Method};
+use axum::http::{Method, header};
 use axum_extra::extract::CookieJar;
 use contract::dto::{ActorType, Role};
 use contract::error as code;
 use sha2::{Digest, Sha256};
 use sqlx::Row;
 
-use crate::app::AppState;
 use crate::error::{AppError, AppResult};
+use crate::state::AppState;
 
 pub const SESSION_COOKIE: &str = "wtow_session";
 pub const PAT_PREFIX: &str = "wtow_pat_";
@@ -68,8 +68,16 @@ impl RoleSet {
     pub fn intersect(&self, other: &RoleSet) -> RoleSet {
         let mut out = HashSet::new();
         for r in [Role::Tester, Role::Assigner, Role::Developer, Role::Admin] {
-            let in_self = if r == Role::Admin { self.0.contains(&r) } else { self.has(r) };
-            let in_other = if r == Role::Admin { other.0.contains(&r) } else { other.has(r) };
+            let in_self = if r == Role::Admin {
+                self.0.contains(&r)
+            } else {
+                self.has(r)
+            };
+            let in_other = if r == Role::Admin {
+                other.0.contains(&r)
+            } else {
+                other.has(r)
+            };
             if in_self && in_other {
                 out.insert(r);
             }
@@ -108,7 +116,10 @@ impl UserCtx {
         if self.is_superadmin && self.token.is_none() {
             Ok(())
         } else {
-            Err(AppError::forbidden(code::FORBIDDEN_ROLE, "requires superadmin"))
+            Err(AppError::forbidden(
+                code::FORBIDDEN_ROLE,
+                "requires superadmin",
+            ))
         }
     }
 }
@@ -144,18 +155,29 @@ impl FromRequestParts<AppState> for UserCtx {
                     project_id: row.get("project_id"),
                     roles: RoleSet::new(parse_roles(row.get("roles"))),
                     read_only: row.get("read_only"),
-                    actor_type: if actor == "human" { ActorType::Human } else { ActorType::Agent },
+                    actor_type: if actor == "human" {
+                        ActorType::Human
+                    } else {
+                        ActorType::Agent
+                    },
                 }),
             });
         }
 
         let jar = CookieJar::from_headers(&parts.headers);
-        let sid = jar.get(SESSION_COOKIE).ok_or_else(AppError::unauthenticated)?.value().to_string();
+        let sid = jar
+            .get(SESSION_COOKIE)
+            .ok_or_else(AppError::unauthenticated)?
+            .value()
+            .to_string();
         if parts.method != Method::GET
             && parts.method != Method::HEAD
             && !parts.headers.contains_key("x-requested-with")
         {
-            return Err(AppError::forbidden(code::FORBIDDEN_ROLE, "missing X-Requested-With header"));
+            return Err(AppError::forbidden(
+                code::FORBIDDEN_ROLE,
+                "missing X-Requested-With header",
+            ));
         }
         let row = sqlx::query(
             "SELECT s.user_id, u.is_superadmin FROM sessions s JOIN users u ON u.id = s.user_id
@@ -165,7 +187,11 @@ impl FromRequestParts<AppState> for UserCtx {
         .fetch_optional(&st.db)
         .await?
         .ok_or_else(AppError::unauthenticated)?;
-        Ok(UserCtx { user_id: row.get("user_id"), token: None, is_superadmin: row.get("is_superadmin") })
+        Ok(UserCtx {
+            user_id: row.get("user_id"),
+            token: None,
+            is_superadmin: row.get("is_superadmin"),
+        })
     }
 }
 
@@ -187,13 +213,19 @@ impl ProjectCtx {
         if self.roles.has(r) {
             Ok(())
         } else {
-            Err(AppError::forbidden(code::FORBIDDEN_ROLE, format!("requires role {}", role_str(r))))
+            Err(AppError::forbidden(
+                code::FORBIDDEN_ROLE,
+                format!("requires role {}", role_str(r)),
+            ))
         }
     }
 
     pub fn require_write(&self) -> AppResult<()> {
         if self.read_only {
-            Err(AppError::forbidden(code::TOKEN_READ_ONLY, "token is read-only"))
+            Err(AppError::forbidden(
+                code::TOKEN_READ_ONLY,
+                "token is read-only",
+            ))
         } else {
             Ok(())
         }
@@ -228,13 +260,13 @@ impl FromRequestParts<AppState> for ProjectCtx {
         .ok_or_else(|| AppError::not_found(format!("project {slug}")))?;
         let project_id: i64 = row.get("id");
 
-        if let Some(t) = &user.token {
-            if t.project_id != project_id {
-                return Err(AppError::forbidden(
-                    code::PROJECT_MISMATCH,
-                    format!("token does not belong to project {slug}"),
-                ));
-            }
+        if let Some(t) = &user.token
+            && t.project_id != project_id
+        {
+            return Err(AppError::forbidden(
+                code::PROJECT_MISMATCH,
+                format!("token does not belong to project {slug}"),
+            ));
         }
         let member_roles: Option<Vec<String>> = row.get("roles");
         let member = if user.is_superadmin {
@@ -245,7 +277,12 @@ impl FromRequestParts<AppState> for ProjectCtx {
             ))
         };
         let (roles, read_only, actor_type, token_id) = match &user.token {
-            Some(t) => (member.intersect(&t.roles), t.read_only, t.actor_type, Some(t.token_id)),
+            Some(t) => (
+                member.intersect(&t.roles),
+                t.read_only,
+                t.actor_type,
+                Some(t.token_id),
+            ),
             None => (member, false, ActorType::Human, None),
         };
 
@@ -272,8 +309,12 @@ pub fn hash_password(pw: &str) -> AppResult<String> {
 }
 
 pub fn verify_password(pw: &str, hash: &str) -> bool {
-    use argon2::password_hash::{phc::PasswordHash, PasswordVerifier};
+    use argon2::password_hash::{PasswordVerifier, phc::PasswordHash};
     PasswordHash::new(hash)
-        .map(|h| argon2::Argon2::default().verify_password(pw.as_bytes(), &h).is_ok())
+        .map(|h| {
+            argon2::Argon2::default()
+                .verify_password(pw.as_bytes(), &h)
+                .is_ok()
+        })
         .unwrap_or(false)
 }

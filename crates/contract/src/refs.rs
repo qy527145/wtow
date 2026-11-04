@@ -33,7 +33,9 @@ fn ref_spans(text: &str) -> Vec<(usize, &str)> {
     while let Some(pos) = text[from..].find("](ATT-") {
         let start = from + pos + 2;
         let rest = &text[start + 4..];
-        let len = rest.find(|c: char| !c.is_ascii_alphanumeric()).unwrap_or(rest.len());
+        let len = rest
+            .find(|c: char| !c.is_ascii_alphanumeric())
+            .unwrap_or(rest.len());
         if len > 0 && rest[len..].starts_with(')') {
             spans.push((start, &text[start..start + 4 + len]));
         }
@@ -51,6 +53,9 @@ mod tests {
         let t = "看图 ![弹窗](ATT-ab12) 和 [日志](ATT-cd34)，再看 ![](ATT-ab12) 与 [x](ATT-) [y](http://a)";
         assert_eq!(attachment_refs(t), vec!["ATT-ab12", "ATT-cd34"]);
         let r = rewrite_refs(t, |id| (id == "ATT-ab12").then(|| "/tmp/a.png".to_string()));
-        assert_eq!(r, "看图 ![弹窗](/tmp/a.png) 和 [日志](ATT-cd34)，再看 ![](/tmp/a.png) 与 [x](ATT-) [y](http://a)");
+        assert_eq!(
+            r,
+            "看图 ![弹窗](/tmp/a.png) 和 [日志](ATT-cd34)，再看 ![](/tmp/a.png) 与 [x](ATT-) [y](http://a)"
+        );
     }
 }

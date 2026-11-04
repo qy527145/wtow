@@ -1,0 +1,13 @@
+[package]
+name = "contract"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "服务端与 CLI 共用的 DTO 和错误码；TS 类型由 ts-rs 从这里生成"
+
+[dependencies]
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+ts-rs.workspace = true

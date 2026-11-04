@@ -1,20 +1,20 @@
+use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
-use axum::Json;
 use contract::dto::{
-    CancelExecReq, ClaimExecQuery, CompleteExecReq, CreateExecReq, ExecComposition, ExecStatus, ListExecQuery, Page,
-    PatchExecReq, ReasonReq, Role,
+    CancelExecReq, ClaimExecQuery, CompleteExecReq, CreateExecReq, ExecComposition, ExecStatus,
+    ListExecQuery, Page, PatchExecReq, ReasonReq, Role,
 };
 use contract::error as code;
 use serde_json::json;
-use sqlx::postgres::PgRow;
 use sqlx::Row;
+use sqlx::postgres::PgRow;
 
-use crate::app::AppState;
+use crate::api::files;
+use crate::api::raw::{audit, ensure_related_checked, if_match, next_id};
 use crate::auth::ProjectCtx;
 use crate::error::{AppError, AppResult};
-use crate::routes::files;
-use crate::routes::raw::{audit, ensure_related_checked, if_match, next_id};
+use crate::state::AppState;
 
 const EXEC_COLS: &str = "e.id, e.instruction, e.target_resources, e.status::text AS status, e.priority,
     e.assigner_id, e.developer_id, e.claimed_at, e.developer_notes, e.result_links, e.version,
@@ -73,7 +73,8 @@ pub async fn load(st: &AppState, ctx: &ProjectCtx, id: &str) -> AppResult<ExecCo
     let mut exec = exec_from_row(&row);
     // 详情一次带全图文上下文：自身附件 + 来源原始作文的附件；列表接口只带自身附件。
     exec.attachments = files::list_owned(st, ctx.project_id, "exec", &[exec.id.clone()]).await?;
-    exec.attachments.extend(files::list_owned(st, ctx.project_id, "raw", &exec.source_raw_ids).await?);
+    exec.attachments
+        .extend(files::list_owned(st, ctx.project_id, "raw", &exec.source_raw_ids).await?);
     Ok(exec)
 }
 
@@ -85,7 +86,10 @@ pub async fn create(
     ctx.require(Role::Assigner)?;
     ctx.require_write()?;
     if ctx.archived {
-        return Err(AppError::conflict(code::INVALID_TRANSITION, "project is archived"));
+        return Err(AppError::conflict(
+            code::INVALID_TRANSITION,
+            "project is archived",
+        ));
     }
     if req.instruction.trim().is_empty() {
         return Err(AppError::validation("instruction is required"));
@@ -130,7 +134,14 @@ pub async fn create(
                 format!("{id} must be claimed by you (status {status})"),
             ));
         }
-        ensure_related_checked(&mut tx, &ctx, &id, r.get("claimed_at"), req.skip_related_check).await?;
+        ensure_related_checked(
+            &mut tx,
+            &ctx,
+            &id,
+            r.get("claimed_at"),
+            req.skip_related_check,
+        )
+        .await?;
     }
 
     if let Some(dev) = req.developer_id {
@@ -143,7 +154,9 @@ pub async fn create(
         .fetch_one(&mut *tx)
         .await?;
         if !is_dev {
-            return Err(AppError::validation(format!("user {dev} is not a developer in this project")));
+            return Err(AppError::validation(format!(
+                "user {dev} is not a developer in this project"
+            )));
         }
     }
 
@@ -185,10 +198,20 @@ pub async fn create(
     } else {
         "UPDATE raw_compositions SET last_activity_at = now() WHERE project_id = $1 AND id = ANY($2)"
     };
-    sqlx::query(close_sql).bind(ctx.project_id).bind(&sources).execute(&mut *tx).await?;
+    sqlx::query(close_sql)
+        .bind(ctx.project_id)
+        .bind(&sources)
+        .execute(&mut *tx)
+        .await?;
 
     files::bind(&mut tx, &ctx, &req.attachment_ids, "exec", &id).await?;
-    files::check_refs(&mut tx, ctx.project_id, &req.instruction, &[("exec", &[id.clone()]), ("raw", &sources)]).await?;
+    files::check_refs(
+        &mut tx,
+        ctx.project_id,
+        &req.instruction,
+        &[("exec", std::slice::from_ref(&id)), ("raw", &sources)],
+    )
+    .await?;
     audit(
         &mut tx,
         &ctx,
@@ -216,22 +239,26 @@ pub async fn list(
         AND ($4::text IS NULL OR $4 = ANY(e.target_resources))
         AND ($5::text IS NULL OR e.instruction ILIKE '%' || $5 || '%')";
     let status = q.status.map(status_str);
-    let kw = q
-        .q
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(|s| s.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_"));
+    let kw =
+        q.q.as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| {
+                s.replace('\\', "\\\\")
+                    .replace('%', "\\%")
+                    .replace('_', "\\_")
+            });
 
-    let total: i64 =
-        sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT count(*) FROM exec_compositions e WHERE {filter}")))
-            .bind(ctx.project_id)
-            .bind(status)
-            .bind(q.developer_id)
-            .bind(&q.target)
-            .bind(&kw)
-            .fetch_one(&st.db)
-            .await?;
+    let total: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "SELECT count(*) FROM exec_compositions e WHERE {filter}"
+    )))
+    .bind(ctx.project_id)
+    .bind(status)
+    .bind(q.developer_id)
+    .bind(&q.target)
+    .bind(&kw)
+    .fetch_one(&st.db)
+    .await?;
     let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT {EXEC_COLS} FROM exec_compositions e WHERE {filter}
           ORDER BY e.priority, e.created_at LIMIT $6 OFFSET $7"
@@ -249,7 +276,10 @@ pub async fn list(
     // 列表只带自身附件，供看板显示「有图」；来源附件留给详情。
     let ids: Vec<String> = items.iter().map(|e| e.id.clone()).collect();
     for a in files::list_owned(&st, ctx.project_id, "exec", &ids).await? {
-        if let Some(e) = items.iter_mut().find(|e| Some(&e.id) == a.owner_id.as_ref()) {
+        if let Some(e) = items
+            .iter_mut()
+            .find(|e| Some(&e.id) == a.owner_id.as_ref())
+        {
             e.attachments.push(a);
         }
     }
@@ -273,7 +303,7 @@ pub async fn raws(
     let exec = load(&st, &ctx, &id).await?;
     let mut out = Vec::with_capacity(exec.source_raw_ids.len());
     for rid in &exec.source_raw_ids {
-        out.push(crate::routes::raw::load(&st, &ctx, rid).await?);
+        out.push(crate::api::raw::load(&st, &ctx, rid).await?);
     }
     Ok(Json(out))
 }
@@ -284,7 +314,7 @@ pub async fn by_raw(
     ctx: ProjectCtx,
     Path((_, id)): Path<(String, String)>,
 ) -> AppResult<Json<Vec<ExecComposition>>> {
-    crate::routes::raw::load(&st, &ctx, &id).await?;
+    crate::api::raw::load(&st, &ctx, &id).await?;
     let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT {EXEC_COLS} FROM exec_compositions e
            JOIN raw_exec_links l ON l.project_id = e.project_id AND l.exec_id = e.id
@@ -311,13 +341,20 @@ async fn lock_exec(
     .fetch_optional(&mut **tx)
     .await?
     .ok_or_else(|| AppError::not_found(format!("exec {id}")))?;
-    Ok((row.get("status"), row.get("developer_id"), row.get("target_resources")))
+    Ok((
+        row.get("status"),
+        row.get("developer_id"),
+        row.get("target_resources"),
+    ))
 }
 
 fn ensure_writable(ctx: &ProjectCtx) -> AppResult<()> {
     ctx.require_write()?;
     if ctx.archived {
-        return Err(AppError::conflict(code::INVALID_TRANSITION, "project is archived"));
+        return Err(AppError::conflict(
+            code::INVALID_TRANSITION,
+            "project is archived",
+        ));
     }
     Ok(())
 }
@@ -341,8 +378,10 @@ pub async fn claim(
     let mut tx = st.db.begin().await?;
     let (status, dev, targets) = lock_exec(&mut tx, &ctx, &id).await?;
     if status != "Queued" || dev.is_some() {
-        return Err(AppError::conflict(code::EXEC_ALREADY_CLAIMED, format!("{id} is {status}"))
-            .with_details(json!({ "developer_id": dev })));
+        return Err(
+            AppError::conflict(code::EXEC_ALREADY_CLAIMED, format!("{id} is {status}"))
+                .with_details(json!({ "developer_id": dev })),
+        );
     }
     let conflicts: Vec<(String, Option<i64>, Vec<String>)> = if targets.is_empty() {
         Vec::new()
@@ -363,8 +402,11 @@ pub async fn claim(
             .iter()
             .map(|(cid, d, t)| json!({ "id": cid, "developer_id": d, "target_resources": t }))
             .collect();
-        return Err(AppError::conflict(code::TARGET_CONFLICT, format!("{id} overlaps in-progress work; pass force=true to claim anyway"))
-            .with_details(json!({ "conflicts": details })));
+        return Err(AppError::conflict(
+            code::TARGET_CONFLICT,
+            format!("{id} overlaps in-progress work; pass force=true to claim anyway"),
+        )
+        .with_details(json!({ "conflicts": details })));
     }
     sqlx::query(
         "UPDATE exec_compositions SET developer_id = $3, claimed_at = now(), status = 'InProgress',
@@ -377,7 +419,15 @@ pub async fn claim(
     .execute(&mut *tx)
     .await?;
     let forced: Vec<&String> = conflicts.iter().map(|c| &c.0).collect();
-    audit(&mut tx, &ctx, "exec.claim", "exec", &id, json!({ "force": q.force, "conflicts": forced })).await?;
+    audit(
+        &mut tx,
+        &ctx,
+        "exec.claim",
+        "exec",
+        &id,
+        json!({ "force": q.force, "conflicts": forced }),
+    )
+    .await?;
     tx.commit().await?;
     Ok(Json(load(&st, &ctx, &id).await?))
 }
@@ -393,10 +443,16 @@ pub async fn release(
     let mut tx = st.db.begin().await?;
     let (status, dev, _) = lock_exec(&mut tx, &ctx, &id).await?;
     if dev != Some(ctx.user_id) && !ctx.roles.has(Role::Assigner) {
-        return Err(AppError::forbidden(code::FORBIDDEN_ROLE, "only the developer, assigner or admin can release"));
+        return Err(AppError::forbidden(
+            code::FORBIDDEN_ROLE,
+            "only the developer, assigner or admin can release",
+        ));
     }
     if status != "InProgress" {
-        return Err(AppError::conflict(code::INVALID_TRANSITION, format!("cannot release {id} in status {status}")));
+        return Err(AppError::conflict(
+            code::INVALID_TRANSITION,
+            format!("cannot release {id} in status {status}"),
+        ));
     }
     sqlx::query(
         "UPDATE exec_compositions SET developer_id = NULL, claimed_at = NULL, status = 'Queued',
@@ -407,7 +463,15 @@ pub async fn release(
     .bind(&id)
     .execute(&mut *tx)
     .await?;
-    audit(&mut tx, &ctx, "exec.release", "exec", &id, json!({ "developer_id": dev, "reason": reason })).await?;
+    audit(
+        &mut tx,
+        &ctx,
+        "exec.release",
+        "exec",
+        &id,
+        json!({ "developer_id": dev, "reason": reason }),
+    )
+    .await?;
     tx.commit().await?;
     Ok(Json(load(&st, &ctx, &id).await?))
 }
@@ -426,10 +490,16 @@ pub async fn complete(
     let mut tx = st.db.begin().await?;
     let (status, dev, _) = lock_exec(&mut tx, &ctx, &id).await?;
     if dev != Some(ctx.user_id) {
-        return Err(AppError::forbidden(code::FORBIDDEN_ROLE, "only the developer who claimed it can complete"));
+        return Err(AppError::forbidden(
+            code::FORBIDDEN_ROLE,
+            "only the developer who claimed it can complete",
+        ));
     }
     if status != "InProgress" {
-        return Err(AppError::conflict(code::INVALID_TRANSITION, format!("cannot complete {id} in status {status}")));
+        return Err(AppError::conflict(
+            code::INVALID_TRANSITION,
+            format!("cannot complete {id} in status {status}"),
+        ));
     }
     sqlx::query(
         "UPDATE exec_compositions SET status = 'Done', developer_notes = $3, result_links = $4,
@@ -459,7 +529,10 @@ pub async fn cancel(
     let mut tx = st.db.begin().await?;
     let (status, _, _) = lock_exec(&mut tx, &ctx, &id).await?;
     if !matches!(status.as_str(), "Queued" | "InProgress") {
-        return Err(AppError::conflict(code::INVALID_TRANSITION, format!("cannot cancel {id} in status {status}")));
+        return Err(AppError::conflict(
+            code::INVALID_TRANSITION,
+            format!("cannot cancel {id} in status {status}"),
+        ));
     }
     sqlx::query(
         "UPDATE exec_compositions SET status = 'Cancelled', version = version + 1, updated_at = now()
@@ -489,7 +562,15 @@ pub async fn cancel(
     } else {
         Vec::new()
     };
-    audit(&mut tx, &ctx, "exec.cancel", "exec", &id, json!({ "reason": reason, "requeued": requeued })).await?;
+    audit(
+        &mut tx,
+        &ctx,
+        "exec.cancel",
+        "exec",
+        &id,
+        json!({ "reason": reason, "requeued": requeued }),
+    )
+    .await?;
     tx.commit().await?;
     Ok(Json(load(&st, &ctx, &id).await?))
 }
@@ -505,10 +586,16 @@ pub async fn reopen(
     let mut tx = st.db.begin().await?;
     let (status, dev, _) = lock_exec(&mut tx, &ctx, &id).await?;
     if dev != Some(ctx.user_id) && !ctx.roles.has(Role::Assigner) {
-        return Err(AppError::forbidden(code::FORBIDDEN_ROLE, "only the developer, assigner or admin can reopen"));
+        return Err(AppError::forbidden(
+            code::FORBIDDEN_ROLE,
+            "only the developer, assigner or admin can reopen",
+        ));
     }
     if status != "Done" {
-        return Err(AppError::conflict(code::INVALID_TRANSITION, format!("cannot reopen {id} in status {status}")));
+        return Err(AppError::conflict(
+            code::INVALID_TRANSITION,
+            format!("cannot reopen {id} in status {status}"),
+        ));
     }
     let old = sqlx::query(
         "SELECT developer_notes, result_links, completed_at FROM exec_compositions WHERE project_id = $1 AND id = $2",
@@ -553,28 +640,44 @@ pub async fn patch(
 ) -> AppResult<Json<ExecComposition>> {
     ensure_writable(&ctx)?;
     let if_match = if_match(&headers)?;
-    if let Some(p) = req.priority {
-        if !(0..=3).contains(&p) {
-            return Err(AppError::validation("priority must be 0-3"));
-        }
+    if let Some(p) = req.priority
+        && !(0..=3).contains(&p)
+    {
+        return Err(AppError::validation("priority must be 0-3"));
     }
     let mut tx = st.db.begin().await?;
     let (status, dev, _) = lock_exec(&mut tx, &ctx, &id).await?;
     let is_assigner = ctx.roles.has(Role::Assigner);
     let is_dev = dev == Some(ctx.user_id);
     if !is_assigner && !is_dev {
-        return Err(AppError::forbidden(code::FORBIDDEN_ROLE, "only the assigner or the developer can edit"));
+        return Err(AppError::forbidden(
+            code::FORBIDDEN_ROLE,
+            "only the assigner or the developer can edit",
+        ));
     }
     // 领取者只能写进展字段，指令、优先级、目标归分配者。
-    if !is_assigner && (req.instruction.is_some() || req.priority.is_some() || req.target_resources.is_some()) {
-        return Err(AppError::forbidden(code::FORBIDDEN_ROLE, "only an assigner can change instruction, priority or targets"));
+    if !is_assigner
+        && (req.instruction.is_some() || req.priority.is_some() || req.target_resources.is_some())
+    {
+        return Err(AppError::forbidden(
+            code::FORBIDDEN_ROLE,
+            "only an assigner can change instruction, priority or targets",
+        ));
     }
-    if matches!(status.as_str(), "Done" | "Cancelled") && (req.instruction.is_some() || req.target_resources.is_some()) {
-        return Err(AppError::conflict(code::INVALID_TRANSITION, format!("{id} is {status}")));
+    if matches!(status.as_str(), "Done" | "Cancelled")
+        && (req.instruction.is_some() || req.target_resources.is_some())
+    {
+        return Err(AppError::conflict(
+            code::INVALID_TRANSITION,
+            format!("{id} is {status}"),
+        ));
     }
-    let targets: Option<Vec<String>> = req
-        .target_resources
-        .map(|v| v.iter().map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect());
+    let targets: Option<Vec<String>> = req.target_resources.map(|v| {
+        v.iter()
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty())
+            .collect()
+    });
     let n = sqlx::query(
         "UPDATE exec_compositions SET
             instruction = COALESCE($3, instruction), priority = COALESCE($4, priority),
@@ -594,7 +697,10 @@ pub async fn patch(
     .await?
     .rows_affected();
     if n == 0 {
-        return Err(AppError::conflict(code::VERSION_CONFLICT, format!("{id} was modified by someone else")));
+        return Err(AppError::conflict(
+            code::VERSION_CONFLICT,
+            format!("{id} was modified by someone else"),
+        ));
     }
     if let Some(i) = &req.instruction {
         let sources: Vec<String> = sqlx::query_scalar(
@@ -604,9 +710,32 @@ pub async fn patch(
         .bind(&id)
         .fetch_all(&mut *tx)
         .await?;
-        files::check_refs(&mut tx, ctx.project_id, i, &[("exec", &[id.clone()]), ("raw", &sources)]).await?;
+        files::check_refs(
+            &mut tx,
+            ctx.project_id,
+            i,
+            &[("exec", std::slice::from_ref(&id)), ("raw", &sources)],
+        )
+        .await?;
     }
     audit(&mut tx, &ctx, "exec.patch", "exec", &id, json!({})).await?;
     tx.commit().await?;
     Ok(Json(load(&st, &ctx, &id).await?))
+}
+
+/// 执行作文管道。
+pub fn router() -> axum::Router<AppState> {
+    use axum::routing::{get, post};
+    axum::Router::new()
+        .route("/projects/{slug}/raw/{id}/execs", get(by_raw))
+        .route("/projects/{slug}/exec", get(list).post(create))
+        .route("/projects/{slug}/exec/{id}", get(self::get).patch(patch))
+        .route(
+            "/projects/{slug}/exec/{id}/claim",
+            post(claim).delete(release),
+        )
+        .route("/projects/{slug}/exec/{id}/complete", post(complete))
+        .route("/projects/{slug}/exec/{id}/cancel", post(cancel))
+        .route("/projects/{slug}/exec/{id}/reopen", post(reopen))
+        .route("/projects/{slug}/exec/{id}/raws", get(raws))
 }

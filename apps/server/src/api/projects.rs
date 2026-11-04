@@ -1,13 +1,13 @@
+use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::Json;
 use contract::dto::{CreateProjectReq, Project, UpdateProjectReq};
 use contract::error as code;
 use sqlx::Row;
 
-use crate::app::AppState;
-use crate::auth::{parse_roles, ProjectCtx, UserCtx};
+use crate::auth::{ProjectCtx, UserCtx, parse_roles};
 use crate::error::{AppError, AppResult};
+use crate::state::AppState;
 
 fn project_from_row(row: &sqlx::postgres::PgRow) -> Project {
     Project {
@@ -20,10 +20,7 @@ fn project_from_row(row: &sqlx::postgres::PgRow) -> Project {
     }
 }
 
-pub async fn list(
-    State(st): State<AppState>,
-    user: UserCtx,
-) -> AppResult<Json<Vec<Project>>> {
+pub async fn list(State(st): State<AppState>, user: UserCtx) -> AppResult<Json<Vec<Project>>> {
     let rows = sqlx::query(
         "SELECT p.slug, p.name, p.description, p.require_human_triage,
                 p.archived_at IS NOT NULL AS archived,
@@ -49,7 +46,9 @@ pub async fn create(
     let valid = !slug.is_empty()
         && slug.len() <= 64
         && slug.starts_with(|c: char| c.is_ascii_lowercase() || c.is_ascii_digit())
-        && slug.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_');
+        && slug
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_');
     if !valid {
         return Err(AppError::validation(
             "slug must be <=64 chars, start alphanumeric, and contain only [a-z0-9_-]",
@@ -150,4 +149,12 @@ pub async fn update(
     .execute(&st.db)
     .await?;
     get(State(st), ctx).await
+}
+
+/// 项目的列表、创建、详情与修改。
+pub fn router() -> axum::Router<AppState> {
+    use axum::routing::get;
+    axum::Router::new()
+        .route("/projects", get(list).post(create))
+        .route("/projects/{slug}", get(self::get).patch(update))
 }

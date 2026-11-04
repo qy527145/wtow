@@ -1,19 +1,21 @@
 //! 超管面板：跨项目查看与操作。项目内的具体操作（成员、令牌、管道）复用项目路由，
 //! 超管在 ProjectCtx 里按 admin 计；这里只放项目路由覆盖不到的全局动作。
 
+use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::Json;
 use contract::dto::{AdminProject, AdminUpdateUserReq, AdminUser};
 use contract::error as code;
 use sqlx::Row;
 
-use crate::app::AppState;
-use crate::auth::{hash_password, UserCtx};
+use crate::auth::{UserCtx, hash_password};
 use crate::error::{AppError, AppResult};
-use crate::routes::files;
+use crate::state::AppState;
 
-pub async fn projects(State(st): State<AppState>, user: UserCtx) -> AppResult<Json<Vec<AdminProject>>> {
+pub async fn projects(
+    State(st): State<AppState>,
+    user: UserCtx,
+) -> AppResult<Json<Vec<AdminProject>>> {
     user.require_superadmin()?;
     let rows = sqlx::query(
         "SELECT p.slug, p.name, p.description, p.archived_at IS NOT NULL AS archived, p.created_at,
@@ -70,14 +72,17 @@ pub async fn delete_project(
         .await?
         .ok_or_else(|| AppError::not_found(format!("project {slug}")))?;
     // idempotency_keys 没有外键，手动清。
-    sqlx::query("DELETE FROM idempotency_keys WHERE project_id = $1").bind(id).execute(&mut *tx).await?;
+    sqlx::query("DELETE FROM idempotency_keys WHERE project_id = $1")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
     tx.commit().await?;
     // 附件按 <project_id>/ 分目录存放；删目录失败只记日志，数据库已是事实来源。
-    let dir = files::root().join(id.to_string());
-    if let Err(e) = tokio::fs::remove_dir_all(&dir).await {
-        if e.kind() != std::io::ErrorKind::NotFound {
-            tracing::warn!(error = %e, dir = %dir.display(), "remove attachment dir");
-        }
+    let dir = st.config.attachment_dir.join(id.to_string());
+    if let Err(e) = tokio::fs::remove_dir_all(&dir).await
+        && e.kind() != std::io::ErrorKind::NotFound
+    {
+        tracing::warn!(error = %e, dir = %dir.display(), "remove attachment dir");
     }
     Ok(StatusCode::NO_CONTENT)
 }
@@ -104,10 +109,17 @@ pub async fn update_user(
     user.require_superadmin()?;
     // 不允许撤掉自己的超管，避免把最后一个超管锁在门外。
     if id == user.user_id && req.is_superadmin == Some(false) {
-        return Err(AppError::conflict(code::VALIDATION, "cannot revoke your own superadmin"));
+        return Err(AppError::conflict(
+            code::VALIDATION,
+            "cannot revoke your own superadmin",
+        ));
     }
     let hash = match req.password.as_deref() {
-        Some(pw) if pw.len() < 8 => return Err(AppError::validation("password must be at least 8 characters")),
+        Some(pw) if pw.len() < 8 => {
+            return Err(AppError::validation(
+                "password must be at least 8 characters",
+            ));
+        }
         Some(pw) => Some(hash_password(pw)?),
         None => None,
     };
@@ -127,7 +139,10 @@ pub async fn update_user(
     .await?
     .ok_or_else(|| AppError::not_found(format!("user {id}")))?;
     if hash.is_some() {
-        sqlx::query("DELETE FROM sessions WHERE user_id = $1").bind(id).execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM sessions WHERE user_id = $1")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
     }
     tx.commit().await?;
     Ok(Json(admin_user_from_row(&row)))
@@ -142,4 +157,14 @@ fn admin_user_from_row(r: &sqlx::postgres::PgRow) -> AdminUser {
         project_count: r.get("project_count"),
         created_at: r.get("created_at"),
     }
+}
+
+/// 超管面板：跨项目的全局操作。
+pub fn router() -> axum::Router<AppState> {
+    use axum::routing::{delete, get, patch};
+    axum::Router::new()
+        .route("/admin/projects", get(projects))
+        .route("/admin/projects/{slug}", delete(delete_project))
+        .route("/admin/users", get(users))
+        .route("/admin/users/{id}", patch(update_user))
 }
