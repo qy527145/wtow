@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "lowercase")]
 pub enum Role {
     Tester,
@@ -9,34 +11,39 @@ pub enum Role {
     Admin,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "lowercase")]
 pub enum ActorType {
     Human,
     Agent,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct Meta {
     pub server_version: String,
     pub api_version: u32,
     pub min_cli_version: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct RegisterReq {
     pub email: String,
     pub display_name: String,
     pub password: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct LoginReq {
     pub email: String,
     pub password: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct User {
     pub id: i64,
     pub email: String,
@@ -46,7 +53,8 @@ pub struct User {
 }
 
 /// 超管面板里的项目行：带上跨项目才需要的统计。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct AdminProject {
     pub slug: String,
     pub name: String,
@@ -62,7 +70,8 @@ pub struct AdminProject {
     pub last_activity_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct AdminUser {
     pub id: i64,
     pub email: String,
@@ -72,19 +81,22 @@ pub struct AdminUser {
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct AdminUpdateUserReq {
     pub is_superadmin: Option<bool>,
     /// 重置密码；同时让该用户的所有会话失效。
     pub password: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct UpdateMeReq {
     pub display_name: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct CreateProjectReq {
     pub slug: String,
     pub name: String,
@@ -92,7 +104,8 @@ pub struct CreateProjectReq {
     pub description: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct Project {
     pub slug: String,
     pub name: String,
@@ -102,7 +115,8 @@ pub struct Project {
     pub my_roles: Vec<Role>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct UpdateProjectReq {
     pub name: Option<String>,
     pub description: Option<String>,
@@ -110,7 +124,8 @@ pub struct UpdateProjectReq {
     pub archived: Option<bool>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct Member {
     pub user_id: i64,
     pub email: String,
@@ -118,13 +133,15 @@ pub struct Member {
     pub roles: Vec<Role>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct UpsertMemberReq {
     pub email: String,
     pub roles: Vec<Role>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct CreateTokenReq {
     pub name: String,
     pub roles: Vec<Role>,
@@ -139,7 +156,8 @@ fn default_agent() -> ActorType {
     ActorType::Agent
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct Token {
     pub id: i64,
     pub name: String,
@@ -156,7 +174,8 @@ pub struct Token {
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct CreatedToken {
     #[serde(flatten)]
     pub token: Token,
@@ -164,7 +183,8 @@ pub struct CreatedToken {
     pub secret: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct WhoAmI {
     pub id: i64,
     pub email: String,
@@ -174,13 +194,15 @@ pub struct WhoAmI {
     pub read_only: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct Page<T> {
     pub items: Vec<T>,
     pub total: i64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub enum RawStatus {
     Pending,
     Claimed,
@@ -190,7 +212,8 @@ pub enum RawStatus {
     Ignored,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum Delivery {
     None,
@@ -199,7 +222,8 @@ pub enum Delivery {
     Cancelled,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct SubmitRawReq {
     pub title: String,
     pub description: String,
@@ -209,7 +233,8 @@ pub struct SubmitRawReq {
     pub attachment_ids: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct Attachment {
     pub id: String,
     pub filename: String,
@@ -220,7 +245,8 @@ pub struct Attachment {
     pub owner_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct RawComposition {
     pub id: String,
     pub title: String,
@@ -240,7 +266,8 @@ pub struct RawComposition {
     pub attachments: Vec<Attachment>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct ListRawQuery {
     pub status: Option<RawStatus>,
     pub tag: Option<String>,
@@ -250,7 +277,8 @@ pub struct ListRawQuery {
     pub page_size: Option<i64>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub enum ExecStatus {
     Queued,
     InProgress,
@@ -258,7 +286,8 @@ pub enum ExecStatus {
     Cancelled,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct CreateExecReq {
     pub source_raw_ids: Vec<String>,
     pub instruction: String,
@@ -274,7 +303,8 @@ pub struct CreateExecReq {
     pub attachment_ids: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct ExecComposition {
     pub id: String,
     pub instruction: String,
@@ -285,6 +315,7 @@ pub struct ExecComposition {
     pub developer_id: Option<i64>,
     pub claimed_at: Option<chrono::DateTime<chrono::Utc>>,
     pub developer_notes: Option<String>,
+    #[ts(type = "string[] | null")]
     pub result_links: serde_json::Value,
     pub version: i32,
     pub created_at: chrono::DateTime<chrono::Utc>,
@@ -297,7 +328,8 @@ pub struct ExecComposition {
     pub attachments: Vec<Attachment>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct ListExecQuery {
     pub status: Option<ExecStatus>,
     pub developer_id: Option<i64>,
@@ -307,7 +339,8 @@ pub struct ListExecQuery {
     pub page_size: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct TriageReq {
     pub target_id: Option<String>,
     pub reason: String,
@@ -315,20 +348,25 @@ pub struct TriageReq {
     pub skip_related_check: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct ReasonReq {
     pub reason: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct PatchRawReq {
     pub title: Option<String>,
     pub description: Option<String>,
     pub tags: Option<Vec<String>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct RelatedItem {
+    /// "raw" 或 "exec"。
+    #[ts(type = "\"raw\" | \"exec\"")]
     pub kind: String,
     pub id: String,
     pub title: String,
@@ -337,20 +375,23 @@ pub struct RelatedItem {
     pub reasons: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct ClaimExecQuery {
     #[serde(default)]
     pub force: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct CompleteExecReq {
     pub developer_notes: String,
     #[serde(default)]
     pub result_links: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct CancelExecReq {
     pub reason: String,
     #[serde(default = "default_true")]
@@ -361,7 +402,8 @@ fn default_true() -> bool {
     true
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct PatchExecReq {
     pub instruction: Option<String>,
     pub priority: Option<i16>,

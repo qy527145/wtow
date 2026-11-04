@@ -1,0 +1,26 @@
+{
+  "name": "@wtow/ui",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./button": "./src/button.tsx",
+    "./feedback": "./src/feedback.tsx",
+    "./form": "./src/form.tsx",
+    "./misc": "./src/misc.tsx",
+    "./overlay": "./src/overlay.tsx",
+    "./lib/utils": "./src/lib/utils.ts"
+  },
+  "dependencies": {
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.66.0",
+    "radix-ui": "^1.8.1",
+    "tailwind-merge": "^3.7.0"
+  },
+  "peerDependencies": {
+    "react": ">=19"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0"
+  }
+}

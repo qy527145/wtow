@@ -6,11 +6,21 @@
 //
 // macOS 用自带的 Apple SDK，Linux 走 cargo-zigbuild（musl 静态链接），Windows 走 cargo-xwin。
 // latest.json 最后写，且用临时文件 rename，避免安装脚本读到指向不存在产物的清单。
-import { $ } from "bun";
+
 import { createHash } from "node:crypto";
-import { copyFile, mkdir, mkdtemp, readFile, rename, rm, utimes, writeFile } from "node:fs/promises";
+import {
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rename,
+  rm,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { $ } from "bun";
 import { deployConfig, root } from "./config.ts";
 
 type Target = {
@@ -25,11 +35,41 @@ type Target = {
 };
 
 export const TARGETS: Target[] = [
-  { triple: "aarch64-apple-darwin", format: "tar.gz", binary: "wtow", linker: "cargo", label: "macOS (Apple Silicon)" },
-  { triple: "x86_64-apple-darwin", format: "tar.gz", binary: "wtow", linker: "cargo", label: "macOS (Intel)" },
-  { triple: "x86_64-unknown-linux-musl", format: "tar.gz", binary: "wtow", linker: "zigbuild", label: "Linux x86_64" },
-  { triple: "aarch64-unknown-linux-musl", format: "tar.gz", binary: "wtow", linker: "zigbuild", label: "Linux arm64" },
-  { triple: "x86_64-pc-windows-msvc", format: "zip", binary: "wtow.exe", linker: "xwin", label: "Windows x86_64" },
+  {
+    triple: "aarch64-apple-darwin",
+    format: "tar.gz",
+    binary: "wtow",
+    linker: "cargo",
+    label: "macOS (Apple Silicon)",
+  },
+  {
+    triple: "x86_64-apple-darwin",
+    format: "tar.gz",
+    binary: "wtow",
+    linker: "cargo",
+    label: "macOS (Intel)",
+  },
+  {
+    triple: "x86_64-unknown-linux-musl",
+    format: "tar.gz",
+    binary: "wtow",
+    linker: "zigbuild",
+    label: "Linux x86_64",
+  },
+  {
+    triple: "aarch64-unknown-linux-musl",
+    format: "tar.gz",
+    binary: "wtow",
+    linker: "zigbuild",
+    label: "Linux arm64",
+  },
+  {
+    triple: "x86_64-pc-windows-msvc",
+    format: "zip",
+    binary: "wtow.exe",
+    linker: "xwin",
+    label: "Windows x86_64",
+  },
 ];
 
 const args = process.argv.slice(2);
@@ -48,20 +88,31 @@ function sha256(buf: Uint8Array): string {
   return createHash("sha256").update(buf).digest("hex");
 }
 
-const host = require_((await $`rustc -vV`.quiet().text()).match(/^host: (.+)$/m)?.[1], "host target from `rustc -vV`");
+const host = require_(
+  (await $`rustc -vV`.quiet().text()).match(/^host: (.+)$/m)?.[1],
+  "host target from `rustc -vV`",
+);
 const only = flag("target");
 const targets = only ? TARGETS.filter((t) => t.triple === only) : TARGETS;
-if (targets.length === 0) throw new Error(`unknown --target ${only}，可选：${TARGETS.map((t) => t.triple).join(", ")}`);
+if (targets.length === 0)
+  throw new Error(`unknown --target ${only}，可选：${TARGETS.map((t) => t.triple).join(", ")}`);
 
 const cfg = deployConfig();
 const baseUrl = (flag("base-url") ?? cfg.publicBaseUrl).replace(/\/+$/, "");
 const outDir = flag("dir") ?? process.env.WTOW_RELEASE_DIR ?? `${root}/data/releases`;
 
 // 版本取自 CLI crate，min_cli_version 取自服务端 /meta，两边始终和实际代码一致。
-const cliToml = await readFile(`${root}/cli/Cargo.toml`, "utf8");
-const version = require_(cliToml.match(/^version = "([^"]+)"/m)?.[1], "version in cli/Cargo.toml");
-const metaRs = await readFile(`${root}/server/src/routes/meta.rs`, "utf8");
-const minCliVersion = require_(metaRs.match(/MIN_CLI_VERSION: &str = "([^"]+)"/)?.[1], "MIN_CLI_VERSION");
+// 版本在根 Cargo.toml 的 [workspace.package] 里统一维护。
+const workspaceToml = await readFile(`${root}/Cargo.toml`, "utf8");
+const version = require_(
+  workspaceToml.match(/^version = "([^"]+)"/m)?.[1],
+  "version in Cargo.toml [workspace.package]",
+);
+const metaRs = await readFile(`${root}/apps/server/src/api/meta.rs`, "utf8");
+const minCliVersion = require_(
+  metaRs.match(/MIN_CLI_VERSION: &str = "([^"]+)"/)?.[1],
+  "MIN_CLI_VERSION",
+);
 
 async function build(t: Target): Promise<string> {
   console.log(`\n▸ ${t.label} (${t.triple})`);
@@ -92,8 +143,9 @@ async function pack(t: Target, built: string): Promise<{ name: string; sha256: s
     await utimes(staged, fixed, fixed);
     await mkdir(outDir, { recursive: true });
     if (t.format === "tar.gz") {
-      await $`tar --uid 0 --gid 0 --uname root --gname root --exclude '._*' -czf ${join(outDir, name)} -C ${stage} ${t.binary}`
-        .env({ ...process.env, COPYFILE_DISABLE: "1" });
+      await $`tar --uid 0 --gid 0 --uname root --gname root --exclude '._*' -czf ${join(outDir, name)} -C ${stage} ${t.binary}`.env(
+        { ...process.env, COPYFILE_DISABLE: "1" },
+      );
     } else {
       // -X 去掉扩展属性与 uid/gid，保证同一输入产出同一字节。
       await $`zip -q -9 -X -j ${join(outDir, name)} ${staged}`;
@@ -131,7 +183,9 @@ const artifacts = [...previous.filter((a) => !fresh.has(a.target)), ...produced]
 );
 
 // install.sh 用 grep 按行解析，所以每个 artifact 必须独占一行。
-const lines = artifacts.map((a) => `    { "target": "${a.target}", "url": "${a.url}", "sha256": "${a.sha256}" }`);
+const lines = artifacts.map(
+  (a) => `    { "target": "${a.target}", "url": "${a.url}", "sha256": "${a.sha256}" }`,
+);
 const manifest = `{
   "version": "${version}",
   "min_cli_version": "${minCliVersion}",
@@ -147,7 +201,8 @@ await rename(`${manifestPath}.tmp`, manifestPath);
 const key = process.env.WTOW_MINISIGN_SECRET_KEY;
 if (key) {
   const has = await $`command -v minisign`.quiet().nothrow();
-  if (has.exitCode !== 0) throw new Error("WTOW_MINISIGN_SECRET_KEY is set but minisign is not installed");
+  if (has.exitCode !== 0)
+    throw new Error("WTOW_MINISIGN_SECRET_KEY is set but minisign is not installed");
   await $`minisign -Sm ${manifestPath} -s ${key}`;
   console.log("\nsigned latest.json");
 } else {

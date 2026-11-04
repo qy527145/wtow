@@ -1,0 +1,25 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "ui": "stream",
+  "globalDependencies": ["**/.env", "**/.env.local", "tsconfig.base.json", "rust-toolchain.toml"],
+  "globalEnv": ["WTOW_BIND", "WTOW_PUBLIC_BASE_URL", "WEB_PORT", "RUST_LOG", "NODE_ENV"],
+  "globalPassThroughEnv": ["LIB", "INCLUDE", "LIBPATH"],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "check": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "test": {
+      "dependsOn": ["^build"],
+      "cache": false
+    }
+  }
+}

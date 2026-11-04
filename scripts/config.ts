@@ -21,7 +21,10 @@ function readEnvFile(path: string): Record<string, string> {
     if (!line || line.startsWith("#")) continue;
     const eq = line.indexOf("=");
     if (eq < 0) continue;
-    out[line.slice(0, eq).trim()] = line.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
+    out[line.slice(0, eq).trim()] = line
+      .slice(eq + 1)
+      .trim()
+      .replace(/^["']|["']$/g, "");
   }
   return out;
 }

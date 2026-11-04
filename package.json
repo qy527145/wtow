@@ -1,24 +1,42 @@
 {
   "name": "wtow",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
+  "packageManager": "bun@1.4.2",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
+    "init": "bun run scripts/init.ts",
+    "dev": "bun run db:up && turbo run dev",
+    "server": "bun scripts/with-env.ts cargo run -p wtow-server",
+    "build": "bun run scripts/build.ts",
+    "build:web": "turbo run build --filter=./apps/web",
+    "build:win": "bun run scripts/build.ts win",
+    "build:mac": "bun run scripts/build.ts mac",
+    "build:linux": "bun run scripts/build.ts linux",
+    "gen:types": "bun run scripts/types.ts",
+    "check": "biome check . && bun run scripts/types.ts && git diff --exit-code -- packages/shared/src/bindings && turbo run check",
+    "test": "turbo run test",
+    "lint": "biome check .",
+    "fmt": "biome check --write . && cargo fmt --all",
+    "clean": "bun run scripts/clean.ts",
     "db:up": "bun scripts/db.ts up",
     "db:down": "bun scripts/db.ts down",
     "db:reset": "bun scripts/db.ts reset",
     "db:psql": "docker exec -it wtow-pg psql -U wtow -d wtow",
-    "web:install": "cd server/web && bun install",
-    "web:dev": "cd server/web && bun run dev",
-    "web:build": "cd server/web && bun run build",
-    "build": "bun run web:build && cargo build --workspace",
-    "build:release": "bun run web:build && cargo build --workspace --release",
-    "check": "cargo build --workspace",
-    "dev": "bun run db:up && bun scripts/with-env.ts cargo run -p wtow-server",
-    "server": "bun scripts/with-env.ts cargo run -p wtow-server",
     "cli": "cargo run -q -p wtow-cli --",
     "skill:install": "cargo run -q -p wtow-cli -- skill install",
     "release": "bun scripts/release.ts",
     "deploy": "bun scripts/deploy.ts",
     "smoke": "bun scripts/with-env.ts bun scripts/smoke.ts"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.4",
+    "@types/bun": "1.4.4",
+    "turbo": "2.11.10",
+    "typescript": "7.0.2"
   }
 }

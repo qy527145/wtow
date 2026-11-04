@@ -1,18 +1,29 @@
-/target/
+# Rust
+/target
 **/*.rs.bk
 
-.env
-.env.*
-!.env.example
-!deploy/.env.example
+# Node / Bun
+node_modules/
+.turbo/
+*.tsbuildinfo
 
+# Build output
+/dist/
+/apps/web/dist/*
+!/apps/web/dist/.gitkeep
+
+# Local overrides & secrets（.env 只放非敏感默认值，提交；密钥写 .env.local）
+.env.local
+.env.*.local
+deploy/.env
+
+# Runtime data（附件与 CLI 产物）
+/data/
+
+# Misc
+*.log
 *.db
 *.sqlite
 *.sqlite3
-
 .DS_Store
 .idea/
-.vscode/
-
-node_modules/
-/data/

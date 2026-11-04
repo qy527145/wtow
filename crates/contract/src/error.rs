@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 pub const UNAUTHENTICATED: &str = "UNAUTHENTICATED";
 pub const FORBIDDEN_ROLE: &str = "FORBIDDEN_ROLE";
@@ -19,15 +20,18 @@ pub const IDEMPOTENCY_KEY_REUSED: &str = "IDEMPOTENCY_KEY_REUSED";
 pub const IDEMPOTENCY_IN_PROGRESS: &str = "IDEMPOTENCY_IN_PROGRESS";
 pub const INTERNAL: &str = "INTERNAL";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct ErrorBody {
     pub code: String,
     pub message: String,
     #[serde(default)]
+    #[ts(type = "unknown")]
     pub details: serde_json::Value,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct ErrorEnvelope {
     pub error: ErrorBody,
 }

@@ -87,42 +87,39 @@
 
 ## 4. 仓库结构
 
-Web 与 CLI 是两个独立的 Cargo 项目，各自构建、各自发布：
+结构沿用 [rust_web](https://github.com/qy527145/rust_web) 模板：一个 Cargo workspace + 一个 bun workspace，Turbo 编排前后端任务。Web 服务端与 CLI 是 workspace 里的两个独立二进制，各自发布：
 
 ```
 wtow/
-├── server/                    # ── Web 程序（独立构建）──
-│   ├── Cargo.toml
-│   ├── src/
-│   │   ├── main.rs
-│   │   ├── config.rs          # env / TOML 配置
-│   │   ├── app.rs             # Router 组装、中间件
-│   │   ├── auth/              # 会话、PAT、角色校验
-│   │   ├── project/           # 项目上下文提取器
-│   │   ├── api/               # raw / exec / files / stats / admin / release
-│   │   ├── domain/            # 状态迁移、认领、建联（纯函数 + 事务编排）
-│   │   ├── jobs/              # 认领超时释放、幂等键清理
-│   │   └── assets.rs          # rust-embed
-│   ├── web/                   # React SPA
-│   │   ├── src/pages/
-│   │   ├── src/components/
-│   │   ├── src/api/           # openapi-typescript 生成
-│   │   └── vite.config.ts
-│   ├── migrations/            # sqlx 迁移
-│   └── deploy/{Dockerfile,compose.yml}
-├── cli/                       # ── CLI（独立构建、独立版本号）──
-│   ├── Cargo.toml
-│   ├── src/{main.rs, cmd/, config.rs}
-│   └── skill/                 # SKILL.md + references/*.md（include_str!）
-├── contract/                  # 仅 wire 类型与错误码，无运行时依赖
-│   └── src/{dto.rs, error.rs}
-├── releases/                  # 构建产物（tar.gz + sha256），由 Web 下发
+├── apps/
+│   ├── server/                # ── Web 服务端 ──
+│   │   ├── src/
+│   │   │   ├── main.rs        # 启动编排：配置 → 迁移 → Router → 优雅停机
+│   │   │   ├── config.rs      # 唯一读取环境变量的地方
+│   │   │   ├── state.rs       # AppState（连接池 + 配置）
+│   │   │   ├── app.rs         # 根 Router：/api/v1、/healthz、安装与下载链路、SPA fallback
+│   │   │   ├── api/           # 按领域分模块，各自导出 router()：raw / exec / files / admin / dist …
+│   │   │   ├── auth.rs        # 会话、PAT、角色校验、项目上下文提取器
+│   │   │   ├── idempotency.rs # 幂等层与认领超时释放
+│   │   │   └── assets.rs      # rust-embed
+│   │   ├── migrations/        # sqlx 迁移
+│   │   └── assets/            # install.sh / install.ps1 / download.html
+│   ├── web/                   # React SPA，构建产物 dist/ 嵌入服务端
+│   └── cli/                   # ── CLI（独立发布）──
+│       ├── src/main.rs
+│       └── skill/             # SKILL.md + references/*.md（include_str!）
+├── crates/contract/           # 仅 wire 类型与错误码，也是 TS 类型的来源（ts-rs）
+├── packages/
+│   ├── ui/                    # Web 组件库
+│   └── shared/                # TS 类型，src/bindings 由 ts-rs 生成
+├── deploy/                    # Dockerfile、compose.yml
+├── scripts/                   # build / types / db / release / deploy / smoke
 └── docs/{PRD.md,DESIGN.md}
 ```
 
-- `cli/` 不依赖 `server/` 的任何代码，也不依赖 axum / sqlx；两者只共享 `contract/` 里的 serde DTO 与错误码常量。
-- `contract/` 刻意做成零依赖的小 crate，只是为了不让接口字段在两边各写一遍。若将来拆成两个仓库，它单独版本化发布，或改为从 OpenAPI 生成。
-- `server/` 与 `cli/` 可以分别设置 CI 流水线与发布节奏，Web 升级不强制 CLI 升级。
+- `apps/cli/` 不依赖 `apps/server/` 的任何代码，也不依赖 axum / sqlx；两者只共享 `crates/contract/` 里的 serde DTO 与错误码常量。
+- `crates/contract/` 刻意保持小而纯，只为不让接口字段在 Rust 两端与 TS 端各写一遍。若将来拆成多个仓库，它单独版本化发布。
+- 服务端与 CLI 共用 workspace 版本号，但分别发布：服务端随部署上线，CLI 由 `bun run release` 打包后经 `/install.sh` 分发，Web 升级不强制 CLI 升级（见 `MIN_CLI_VERSION`）。
 
 ---
 
@@ -618,7 +615,7 @@ RETURNING id;
 
 `utoipa` 标注 handler → `/api/openapi.json` → CI 中 `openapi-typescript` 生成 `web/src/api/schema.d.ts`。接口变更导致前端类型不匹配时构建失败。
 
-当前尚未接入 utoipa，前端类型手写在 `web/src/api/types.ts`，与 `contract/src/dto.rs` 一一对应，改 DTO 时需同步。
+当前尚未接入 utoipa。前端类型由 ts-rs 从 `crates/contract/src/dto.rs` 生成到 `packages/shared/src/bindings`（`bun run gen:types`），`bun run check` 会校验产物未过期。
 
 ---
 
@@ -772,7 +769,7 @@ services:
 - 独立流水线，版本号独立（semver），与 Web 版本解耦。
 - 构建目标：`aarch64-apple-darwin`、`x86_64-apple-darwin`、`x86_64-unknown-linux-musl`、`aarch64-unknown-linux-musl`。
 - 产物：`wtow-v1.4.2-aarch64-apple-darwin.tar.gz` + 同名 `.sha256`，连同 `latest.json` 清单推送到 Web 的 `WTOW_RELEASE_DIR`，或由管理员手工上传。
-- 打包由 `bun run release`（`scripts/release.ts`）完成：按 `--target` 交叉编译、固定 mtime 与属主保证可复现，并把同一目录下其它架构的条目合并进 `latest.json`；`version` 取自 `cli/Cargo.toml`，`min_cli_version` 取自服务端常量，避免清单与代码漂移。
+- 打包由 `bun run release`（`scripts/release.ts`）完成：按 `--target` 交叉编译、固定 mtime 与属主保证可复现，并把同一目录下其它架构的条目合并进 `latest.json`；`version` 取自根 `Cargo.toml` 的 `[workspace.package]`，`min_cli_version` 取自服务端常量，避免清单与代码漂移。
 - 兼容性：服务端 `/api/v1/meta` 返回 `{ api_version, min_cli_version }`，CLI 启动时校验；低于下限时直接报错并提示升级命令，而不是带着旧协议半途失败。
 
 ### 16.3 Web 提供 CLI 的下载与安装

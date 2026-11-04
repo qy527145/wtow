@@ -1,0 +1,5 @@
+# ts-rs：`cargo test -p contract` 时把 DTO 导出成 TS 类型，前端直接消费。
+[env]
+TS_RS_EXPORT_DIR = { value = "packages/shared/src/bindings", relative = true }
+# ID 与计数都远小于 2^53，用 number 与前端原有写法保持一致。
+TS_RS_LARGE_INT = "number"

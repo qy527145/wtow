@@ -17,9 +17,10 @@
 // - 服务器上不装 Rust，本地交叉编译出 x86_64-unknown-linux-musl 静态二进制再上传。
 // - 容器镜像跑在 docker.1ms.run 镜像源上，避免直连 Docker Hub。
 // - 重复部署是安全的：先在临时目录 prepare，再原子替换 build/，最后 compose up 重建。
+
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { $ } from "bun";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
 import { deployConfig, root } from "./config.ts";
 
 const args = process.argv.slice(2);
@@ -50,27 +51,34 @@ const zig = await $`command -v cargo-zigbuild`.quiet().nothrow();
 if (zig.exitCode !== 0) throw new Error("cargo-zigbuild 未安装：cargo install cargo-zigbuild");
 done("本地工具链齐全");
 
-const remoteCheck = await $`ssh -o ConnectTimeout=10 ${sshHost} 'docker version --format "{{.Server.Version}}" && docker compose version --short'`
-  .quiet()
-  .nothrow()
-  .text()
-  .catch(() => "");
-if (!remoteCheck.trim()) throw new Error(`无法通过 ssh ${sshHost} 连上服务器，或服务器上没有 docker/compose`);
+const remoteCheck =
+  await $`ssh -o ConnectTimeout=10 ${sshHost} 'docker version --format "{{.Server.Version}}" && docker compose version --short'`
+    .quiet()
+    .nothrow()
+    .text()
+    .catch(() => "");
+if (!remoteCheck.trim())
+  throw new Error(`无法通过 ssh ${sshHost} 连上服务器，或服务器上没有 docker/compose`);
 const [dockerVer, composeVer] = remoteCheck.trim().split("\n");
 done(`服务器 docker ${dockerVer} / compose ${composeVer}`);
 
 // ── 1. 编译 ────────────────────────────────────────────────────────────────
 const serverBin = `${root}/target/${linuxTarget}/release/wtow-server`;
 if (skipBuild) {
-  await $`test -f ${serverBin}`.quiet().nothrow().then((r) => {
-    if (r.exitCode !== 0) throw new Error(`--skip-build 但找不到 ${serverBin}`);
-  });
+  await $`test -f ${serverBin}`
+    .quiet()
+    .nothrow()
+    .then((r) => {
+      if (r.exitCode !== 0) throw new Error(`--skip-build 但找不到 ${serverBin}`);
+    });
   done(`复用 ${serverBin}`);
 } else {
   step(`编译服务端（${linuxTarget}，musl 静态链接）`);
-  await $`bun run web:build`.cwd(root);
+  await $`bun run build:web`.cwd(root);
   await $`cargo zigbuild --release --target ${linuxTarget} -p wtow-server`.cwd(root);
-  done(`${(await readFile(serverBin)).length / 1024 / 1024 | 0} MB → target/${linuxTarget}/release/wtow-server`);
+  done(
+    `${((await readFile(serverBin)).length / 1024 / 1024) | 0} MB → target/${linuxTarget}/release/wtow-server`,
+  );
 }
 
 // ── 2. CLI 产物 ────────────────────────────────────────────────────────────
@@ -79,7 +87,9 @@ if (skipCli) {
   done("跳过 CLI 打包");
 } else {
   step("打包 CLI（5 个平台）");
-  await $`bun run scripts/release.ts --base-url ${cfg.publicBaseUrl} --dir ${root}/data/releases`.cwd(root);
+  await $`bun run scripts/release.ts --base-url ${cfg.publicBaseUrl} --dir ${root}/data/releases`.cwd(
+    root,
+  );
 }
 
 // ── 3. 上传 ────────────────────────────────────────────────────────────────
@@ -157,7 +167,10 @@ const healthUrl = `${baseUrl}/healthz`;
 let ready = false;
 for (let i = 0; i < 60; i++) {
   const r = await $`curl -fsS --noproxy '*' --max-time 3 ${healthUrl}`.quiet().nothrow();
-  if (r.exitCode === 0) { ready = true; break; }
+  if (r.exitCode === 0) {
+    ready = true;
+    break;
+  }
   await Bun.sleep(1000);
 }
 if (!ready) {
@@ -169,10 +182,14 @@ done(`${healthUrl} 返回 ok`);
 
 // 清单和安装脚本都要能拿到，否则 CLI 装不上。
 const version = require_(
-  (await $`curl -fsS --noproxy '*' --max-time 5 ${baseUrl}/dl/latest.json`.quiet().text()).match(/"version": "([^"]+)"/)?.[1],
+  (await $`curl -fsS --noproxy '*' --max-time 5 ${baseUrl}/dl/latest.json`.quiet().text()).match(
+    /"version": "([^"]+)"/,
+  )?.[1],
   "version in latest.json",
 );
-const installed = await $`curl -fsS --noproxy '*' --max-time 5 ${baseUrl}/install.sh`.quiet().text();
+const installed = await $`curl -fsS --noproxy '*' --max-time 5 ${baseUrl}/install.sh`
+  .quiet()
+  .text();
 if (!installed.includes("wtow CLI")) throw new Error("/install.sh 内容异常");
 done(`latest.json v${version}，install.sh 正常下发`);
 

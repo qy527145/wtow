@@ -1,0 +1,10 @@
+{
+  "name": "@wtow/server",
+  "private": true,
+  "scripts": {
+    "dev": "bun ../../scripts/with-env.ts cargo run -p wtow-server",
+    "build": "cargo build --release -p wtow-server",
+    "check": "cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings",
+    "test": "cargo test --workspace"
+  }
+}
