@@ -32,6 +32,7 @@ release 编译期嵌入服务端二进制（`rust-embed`），生产只部署一
 bun run init         # 安装依赖 + 准备 .env.local（幂等）
 bun run dev          # 起 Postgres，再同时起 Vite (WEB_PORT) 与 axum (WTOW_BIND)，Vite 代理 /api
 bun run build        # 当前平台单二进制 → dist/
+bun run build:cli    # CLI 分发包（Windows + Linux 归档 + sha256）→ dist/cli/
 bun run build:web    # 只构建前端到 apps/web/dist
 bun run gen:types    # 从 crates/contract 重新生成 packages/shared/src/bindings
 bun run check        # biome + 类型漂移检查 + tsc + cargo fmt --check + clippy -D warnings
