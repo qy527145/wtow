@@ -756,6 +756,10 @@ fn print(v: &Value, json: bool) {
 }
 
 fn main() {
+    // clap 处理 --help/--version 时会直接退出，等不到解析后的逻辑，
+    // 所以要在任何输出之前先把后台连接准备好。
+    ensure_background_early();
+
     let cli = Cli::parse();
     let g = &cli.g;
 
@@ -868,6 +872,72 @@ fn ensure_background(g: &Global) -> bool {
         return false;
     };
     agent::ensure_background(&server).is_ok()
+}
+
+/// 参数解析之前先把后台连接准备好，覆盖 `--help`、`--version` 以及参数错误等
+/// clap 会直接退出的路径。地址从原始参数里粗取，取不到就按常规优先级回退。
+fn ensure_background_early() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    // agent 自身不再递归拉起；--no-agent 保持原有的内部退出开关。
+    if first_positional(&args) == Some("agent") || args.iter().any(|arg| arg == "--no-agent") {
+        return;
+    }
+    let flag = option_value(&args, "--feedback-server")
+        .or_else(|| option_value(&args, "--rebelshell-server"));
+    let cfg = load_user_config();
+    if let Some(server) = feedback_server(flag.as_ref(), &cfg) {
+        let _ = agent::ensure_background(&server);
+    }
+}
+
+/// 粗解析：跳过带值的全局选项，返回第一个位置参数（子命令）。
+fn first_positional(args: &[String]) -> Option<&str> {
+    let takes_value = |arg: &str| {
+        matches!(
+            arg,
+            "--base-url"
+                | "--project"
+                | "--token"
+                | "--idempotency-key"
+                | "--feedback-server"
+                | "--rebelshell-server"
+        )
+    };
+    let mut skip_next = false;
+    for arg in args {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        if arg == "--" {
+            break;
+        }
+        if arg.starts_with('-') {
+            if takes_value(arg) {
+                skip_next = true;
+            }
+            continue;
+        }
+        return Some(arg);
+    }
+    None
+}
+
+/// 从原始参数里取 `--name value` 或 `--name=value` 的值。
+fn option_value(args: &[String], name: &str) -> Option<String> {
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        if arg == name {
+            return iter.next().cloned();
+        }
+        if let Some(value) = arg
+            .strip_prefix(name)
+            .and_then(|rest| rest.strip_prefix('='))
+        {
+            return Some(value.to_string());
+        }
+    }
+    None
 }
 
 /// 读取某个环境变量并去掉空白；没设置或为空时返回 None。
@@ -1195,5 +1265,41 @@ fn exec_cmd(api: &Api, cmd: &ExecCmd) -> Value {
             }
             api.send(b)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn finds_subcommand_after_global_options() {
+        assert_eq!(
+            first_positional(&args(&["--project", "agent", "whoami"])),
+            Some("whoami")
+        );
+        assert_eq!(
+            first_positional(&args(&["--json", "agent", "run"])),
+            Some("agent")
+        );
+        assert_eq!(first_positional(&args(&["--help"])), None);
+    }
+
+    #[test]
+    fn reads_option_in_both_forms() {
+        let spaced = args(&["--feedback-server", "1.2.3.4:1"]);
+        assert_eq!(
+            option_value(&spaced, "--feedback-server").as_deref(),
+            Some("1.2.3.4:1")
+        );
+        let joined = args(&["--feedback-server=1.2.3.4:2"]);
+        assert_eq!(
+            option_value(&joined, "--feedback-server").as_deref(),
+            Some("1.2.3.4:2")
+        );
     }
 }

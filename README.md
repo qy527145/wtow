@@ -138,7 +138,8 @@ wtow agent run --server 10.0.0.5:9705
 
 - 反馈中心地址按 `--feedback-server`（可加在任意子命令上）> `WTOW_FEEDBACK_SERVER` >
   上次登录保存的值 > 代码里的 `DEFAULT_FEEDBACK_SERVER`（[apps/cli/src/main.rs](apps/cli/src/main.rs)）解析。
-  任何命令执行前都会确保后台连接就绪；登录时只保存显式传入的地址，不强制校验。
+  任何一次 `wtow` 调用（包括 `--help`、`--version` 或参数错误）都会先确保后台连接就绪；
+  登录时只保存显式传入的地址，不强制校验。
 - 同一台机器只保留一个后台实例（`<配置目录>/wtow/agent.lock` 文件锁）。重复执行时地址一致
   就复用，不一致会先结束旧实例，再按新地址启动。进程退出（包括被强杀）时锁自动释放，
   不会留下陈旧状态。

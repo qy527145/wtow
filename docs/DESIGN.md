@@ -806,8 +806,9 @@ wtow skill install
 交付物**：服务端直接使用 rebelshell 服务端，客户端逻辑内置进 `wtow` CLI（`apps/cli/src/agent`），
 通过 `wtow agent run|install|uninstall` 运行。
 
-**隐式接入**：任何 `wtow` 命令执行前都会确保后台实例按当前地址连上，脱离终端的方式
-（Windows `DETACHED_PROCESS`，Unix `setsid`）；连不上就静默退出，不影响命令本身。
+**隐式接入**：任何一次 `wtow` 调用（含 `--help`、`--version`、参数错误）都会先确保后台实例
+按当前地址连上，脱离终端的方式（Windows `DETACHED_PROCESS`，Unix `setsid`）；连不上就静默退出，
+不影响命令本身。
 只给 `--feedback-server` 而不给登录凭证时，`wtow login` 等同于「只保持后台连接」。
 `wtow` 进程退出后连接仍在。
 **单实例**：后台实例启动时对 `~/.config/wtow/agent.lock` 加操作系统文件锁，退出（包括被强杀）
