@@ -87,7 +87,7 @@ pub fn run(config: AgentConfig, exit_on_error: bool) -> Result<(), String> {
 /// 输出全部丢弃：这是隐式的后台能力，不往终端或日志里写东西。
 /// 同一台机器是否已有实例由 `run` 的运行锁把关：重复拉起时新进程会自行退出。
 pub fn spawn_background(server: &str) -> Result<(), String> {
-    let exe = std::env::current_exe().map_err(|err| format!("无法定位当前可执行文件: {err}"))?;
+    let exe = agent_exe()?;
     let mut cmd = std::process::Command::new(exe);
     cmd.args(["agent", "run", "--server", server, "--exit-on-error"])
         .stdin(std::process::Stdio::null())
@@ -118,6 +118,130 @@ pub fn spawn_background(server: &str) -> Result<(), String> {
     cmd.spawn()
         .map(|_| ())
         .map_err(|err| format!("后台启动 Agent 失败: {err}"))
+}
+
+/// 后台实例使用可执行文件副本运行。
+///
+/// Windows 上正在运行的 exe 会被锁定，如果直接跑构建产物，下次 `cargo build`
+/// 就会报 LNK1104。副本按源文件的长度与修改时间命名，重建后自动换新，并顺手
+/// 清理旧副本（正在运行的删不掉，忽略即可）。
+fn agent_exe() -> Result<PathBuf, String> {
+    let current =
+        std::env::current_exe().map_err(|err| format!("无法定位当前可执行文件: {err}"))?;
+    #[cfg(windows)]
+    {
+        if let Some(dir) = dirs::config_dir().map(|dir| dir.join("wtow"))
+            && let Ok(path) = copy_runtime_exe(&current, &dir)
+        {
+            return Ok(path);
+        }
+    }
+    Ok(current)
+}
+
+#[cfg(windows)]
+fn copy_runtime_exe(src: &Path, dir: &Path) -> std::io::Result<PathBuf> {
+    let meta = fs::metadata(src)?;
+    let mtime = meta
+        .modified()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let dst = dir.join(format!("agent-{:x}-{:x}.exe", meta.len(), mtime));
+    if !dst.exists() {
+        fs::create_dir_all(dir)?;
+        fs::copy(src, &dst)?;
+    }
+
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if name.starts_with("agent-") && name.ends_with(".exe") && path != dst {
+                let _ = fs::remove_file(path);
+            }
+        }
+    }
+    Ok(dst)
+}
+
+/// 保证后台实例在运行，并且连接的是 `server`。
+///
+/// 已有实例但地址不同时，先结束旧进程，等运行锁释放后按新地址启动。
+pub fn ensure_background(server: &str) -> Result<(), String> {
+    match running_server() {
+        Some(current) if current == server => return Ok(()),
+        Some(_) => {
+            // 结束失败也继续等：进程可能刚好自己退出了。
+            let _ = stop_running();
+            wait_until_stopped(Duration::from_secs(3))?;
+        }
+        None => {}
+    }
+    spawn_background(server)
+}
+
+fn stop_running() -> Result<(), String> {
+    let pid = state_pid().ok_or("无法确定正在运行的实例（缺少 PID）")?;
+    terminate_process(pid)
+}
+
+fn state_pid() -> Option<u32> {
+    state_path()
+        .and_then(|path| fs::read_to_string(path).ok())
+        .and_then(|text| text.split_whitespace().next()?.parse().ok())
+}
+
+fn wait_until_stopped(timeout: Duration) -> Result<(), String> {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if running_server().is_none() {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    Err("旧实例未在预期时间内退出".to_string())
+}
+
+#[cfg(windows)]
+fn terminate_process(pid: u32) -> Result<(), String> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_TERMINATE, TerminateProcess};
+
+    // SAFETY: 句柄在本函数内关闭；pid 来自运行锁持有者写入的 state 文件。
+    #[allow(unsafe_code)]
+    unsafe {
+        let handle = OpenProcess(PROCESS_TERMINATE, 0, pid);
+        if handle.is_null() {
+            return Err(format!(
+                "打开进程 {pid} 失败: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        let ok = TerminateProcess(handle, 1);
+        let err = std::io::Error::last_os_error();
+        CloseHandle(handle);
+        if ok == 0 {
+            return Err(format!("结束进程 {pid} 失败: {err}"));
+        }
+        Ok(())
+    }
+}
+
+#[cfg(unix)]
+fn terminate_process(pid: u32) -> Result<(), String> {
+    // SAFETY: kill(2) 只接收 pid 与信号。
+    #[allow(unsafe_code)]
+    let result = unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+    if result == 0 {
+        return Ok(());
+    }
+    let err = std::io::Error::last_os_error();
+    if err.raw_os_error() == Some(libc::ESRCH) {
+        Ok(())
+    } else {
+        Err(format!("结束进程 {pid} 失败: {err}"))
+    }
 }
 
 fn lock_path() -> Option<PathBuf> {

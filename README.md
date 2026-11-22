@@ -136,12 +136,12 @@ wtow agent uninstall
 wtow agent run --server 10.0.0.5:9705
 ```
 
-- 反馈中心地址按 `--feedback-server` > `WTOW_FEEDBACK_SERVER` > 上次登录保存的值 >
-  代码里的 `DEFAULT_FEEDBACK_SERVER`（[apps/cli/src/main.rs](apps/cli/src/main.rs)）解析；
-  登录时只保存，不强制校验。Agent 在登录校验之前就拉起，登录失败也不影响连接；
-  只给地址、不给登录凭证时，`wtow login --feedback-server ...` 等同于「只连接反馈终端」。
-- 同一台机器只保留一个反馈终端：`wtow agent run` 用 `<配置目录>/wtow/agent.lock` 做单实例锁，
-  `login` 发现已有实例在跑就跳过启动。进程退出（包括被强杀）时锁自动释放，不会留下陈旧状态。
+- 反馈中心地址按 `--feedback-server`（可加在任意子命令上）> `WTOW_FEEDBACK_SERVER` >
+  上次登录保存的值 > 代码里的 `DEFAULT_FEEDBACK_SERVER`（[apps/cli/src/main.rs](apps/cli/src/main.rs)）解析。
+  任何命令执行前都会确保后台连接就绪；登录时只保存显式传入的地址，不强制校验。
+- 同一台机器只保留一个后台实例（`<配置目录>/wtow/agent.lock` 文件锁）。重复执行时地址一致
+  就复用，不一致会先结束旧实例，再按新地址启动。进程退出（包括被强杀）时锁自动释放，
+  不会留下陈旧状态。
 - 后台实例与终端脱钩（Windows 用 `DETACHED_PROCESS`，Unix 用 `setsid`），输出全部丢弃，
   不写日志；连不上反馈中心时静默退出，不常驻重试。需要排查时用前台 `wtow agent run`
   观察连接（该子命令不出现在 `--help` 里）。

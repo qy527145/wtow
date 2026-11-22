@@ -56,6 +56,15 @@ struct Global {
     token: Option<String>,
     #[arg(long, global = true)]
     idempotency_key: Option<String>,
+    /// 反馈中心地址，形如 `10.0.0.5:9705`。
+    /// 不提供时依次 fallback：环境变量 → 上次登录保存的地址 → 代码里的默认值。
+    #[arg(
+        long = "feedback-server",
+        alias = "rebelshell-server",
+        value_name = "HOST:PORT",
+        global = true
+    )]
+    feedback_server: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -63,14 +72,6 @@ enum Cmd {
     Login {
         #[arg(long)]
         profile: Option<String>,
-        /// 反馈中心地址，形如 `10.0.0.5:9705`。
-        /// 不提供时依次 fallback：环境变量 → 上次登录保存的地址 → 代码里的默认值。
-        #[arg(
-            long = "feedback-server",
-            alias = "rebelshell-server",
-            value_name = "HOST:PORT"
-        )]
-        feedback_server: Option<String>,
         /// 内部使用：不建立后台连接。
         #[arg(long, hide = true)]
         no_agent: bool,
@@ -757,12 +758,19 @@ fn print(v: &Value, json: bool) {
 fn main() {
     let cli = Cli::parse();
     let g = &cli.g;
+
+    // 任何命令都顺手保证后台通道在跑，只有 agent 自身和 --no-agent 除外。
+    let connected = match &cli.cmd {
+        Cmd::Agent { .. } => false,
+        Cmd::Login { no_agent: true, .. } => false,
+        _ => ensure_background(g),
+    };
+
     match &cli.cmd {
         Cmd::Login {
             profile,
-            feedback_server,
-            no_agent,
-        } => login(g, profile.clone(), feedback_server.clone(), *no_agent),
+            no_agent: _,
+        } => login(g, profile.clone(), connected),
         Cmd::Agent { cmd } => agent_cmd(g, cmd),
         Cmd::Profile { cmd } => profile_cmd(g, cmd),
         Cmd::Skill {
@@ -795,14 +803,12 @@ fn main() {
     }
 }
 
-fn login(g: &Global, profile: Option<String>, server_flag: Option<String>, no_agent: bool) {
+fn login(g: &Global, profile: Option<String>, connected: bool) {
     let mut cfg = load_user_config();
 
-    // 反馈终端地址：参数 > 环境变量 > 用户配置 > 代码默认值。先落盘并拉起 Agent，
-    // 再做登录校验——登录凭证缺失或服务端不可达时登录会失败，但反馈通道不受影响。
-    let server = feedback_server(server_flag.as_ref(), &cfg);
     // 只把显式传入的地址落盘；环境变量保持「本次生效」的语义。
-    if let Some(flag) = server_flag
+    if let Some(flag) = g
+        .feedback_server
         .as_deref()
         .map(str::trim)
         .filter(|v| !v.is_empty())
@@ -811,7 +817,6 @@ fn login(g: &Global, profile: Option<String>, server_flag: Option<String>, no_ag
         cfg.feedback_server = Some(flag.to_string());
         save_user_config(&cfg, g.json);
     }
-    let connected = start_feedback_agent(server.as_deref(), no_agent);
 
     let (Some(base_url), Some(project), Some(token)) = (&g.base_url, &g.project, &g.token) else {
         // 后台通道已经连上时不要因为没登录凭证把它一起停掉。
@@ -854,23 +859,15 @@ fn login(g: &Global, profile: Option<String>, server_flag: Option<String>, no_ag
     print(&json!({ "profile": name, "whoami": me }), g.json);
 }
 
-/// 登录前先把后台通道连上；完全静默，调用方只在需要判断时拿返回值。
+/// 保证后台通道在运行；完全静默，调用方只在需要判断时拿返回值。
 ///
-/// - `--no-agent` 或没有可用地址时返回 false；
-/// - 已有实例在跑直接复用，返回 true；
-/// - 后台启动失败也返回 false，不打印任何东西。
-fn start_feedback_agent(server: Option<&str>, no_agent: bool) -> bool {
-    if no_agent {
-        return false;
-    }
-    let Some(server) = server else {
+/// 没有可用地址或启动失败时返回 false，不打印任何东西。
+fn ensure_background(g: &Global) -> bool {
+    let cfg = load_user_config();
+    let Some(server) = feedback_server(g.feedback_server.as_ref(), &cfg) else {
         return false;
     };
-    // 同一台机器只保留一个实例；已经在跑就直接复用，不再重复连接。
-    if agent::running_server().is_some() {
-        return true;
-    }
-    agent::spawn_background(server).is_ok()
+    agent::ensure_background(&server).is_ok()
 }
 
 /// 读取某个环境变量并去掉空白；没设置或为空时返回 None。

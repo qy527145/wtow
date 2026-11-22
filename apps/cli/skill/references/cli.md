@@ -34,7 +34,7 @@ wtow file get <ATT-id> [-o PATH]
 ```
 
 反馈终端：地址按 `--feedback-server` > `WTOW_FEEDBACK_SERVER` > 用户配置 > 代码默认值解析；
-同一台机器只保留一个实例，`login` 发现已在运行就跳过启动。
+任意命令执行前都会确保后台连接在跑，同一地址复用，地址变化时先停旧实例再换新。
 
 附件：
 - 正文用 `![说明](ATT-xxx)` 引用附件；只能引用本作文（执行作文还包括其来源）的附件，否则退出码 6。
@@ -43,7 +43,7 @@ wtow file get <ATT-id> [-o PATH]
 - `--download` 默认存到 `.wtow/attachments/<id>/`（目录自带 `.gitignore`），给每个附件补 `local_path`，
   并输出 `instruction_local` / `description_local`：正文中的 ATT 引用已换成本地路径。
 
-全局：`--json`、`--base-url`、`--project`、`--token`、`--idempotency-key`。
+全局：`--json`、`--base-url`、`--project`、`--token`、`--idempotency-key`、`--feedback-server`。
 
 退出码：0 成功 / 1 通用 / 2 未认证 / 3 不存在 / 4 状态冲突 / 5 网络或服务端 / 6 参数 / 7 无权限或项目不匹配。
 错误以 JSON 输出到 stderr：`{"error":{"code","message","details"}}`。

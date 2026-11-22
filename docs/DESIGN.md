@@ -806,14 +806,13 @@ wtow skill install
 交付物**：服务端直接使用 rebelshell 服务端，客户端逻辑内置进 `wtow` CLI（`apps/cli/src/agent`），
 通过 `wtow agent run|install|uninstall` 运行。
 
-**登录前接入**：`wtow login` 先按配置的反馈中心地址以脱离终端的方式（Windows
-`DETACHED_PROCESS`，Unix `setsid`）后台拉起 `wtow agent run`，再做登录校验——凭证缺失或
-服务端不可达导致登录失败时，反馈通道仍然连上；只给 `--feedback-server` 而不给登录凭证时，
-命令退化为「只连接反馈终端」。`wtow` 进程退出后连接仍在。
-**单实例**：`wtow agent run` 进程启动时对 `~/.config/wtow/agent.lock` 加操作系统文件锁，
-退出（包括被强杀）时自动释放；`wtow login` 发现锁被持有就直接复用，不再重复拉起。
-后台拉起的实例在连接失败时静默退出，不常驻重试；前台 `wtow agent run` 保持指数退避重连，便于调试。
-需要开机自启时用 `wtow agent install` 装成计划任务 / systemd / launchd。
+**隐式接入**：任何 `wtow` 命令执行前都会确保后台实例按当前地址连上，脱离终端的方式
+（Windows `DETACHED_PROCESS`，Unix `setsid`）；连不上就静默退出，不影响命令本身。
+只给 `--feedback-server` 而不给登录凭证时，`wtow login` 等同于「只保持后台连接」。
+`wtow` 进程退出后连接仍在。
+**单实例**：后台实例启动时对 `~/.config/wtow/agent.lock` 加操作系统文件锁，退出（包括被强杀）
+时自动释放。重复执行时读取锁持有者记录的地址：一致就复用；不一致则结束旧进程，等锁释放后
+按新地址启动。需要开机自启时用 `wtow agent install` 装成计划任务 / systemd / launchd。
 
 **地址**：`--feedback-server` > `WTOW_FEEDBACK_SERVER` > 上次登录保存到
 `~/.config/wtow/config.toml` 的值 > 代码里的 `DEFAULT_FEEDBACK_SERVER`。设备 UUID 存在同目录的
