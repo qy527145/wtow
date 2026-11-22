@@ -16,7 +16,7 @@ pub mod pty;
 pub mod service;
 
 use std::collections::VecDeque;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io::{BufWriter, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
@@ -38,7 +38,11 @@ const CHUNK_SIZE: usize = 64 * 1024;
 const TERMINAL_POLL: Duration = Duration::from_millis(15);
 
 /// 前台运行：连上反馈中心并维持会话，断线后按指数退避重连。
+///
+/// 同一台机器只保留一个实例：已有 Agent 运行时直接返回错误，不会重复连接。
 pub fn run(config: AgentConfig) -> Result<(), String> {
+    // 锁要一直持有到进程退出，交给 `_lock` 的 Drop + 操作系统释放。
+    let _lock = acquire_lock(&config)?;
     println!(
         "[wtow agent] 启动：server={} uuid={} heartbeat={}s",
         config.server, config.uuid, config.heartbeat_secs
@@ -67,7 +71,7 @@ pub fn run(config: AgentConfig) -> Result<(), String> {
 /// - Windows：`DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`，关掉终端也不影响。
 /// - Unix：`setsid` 脱离控制终端，输出写到 `~/.config/wtow/agent.log`。
 ///
-/// 重复调用没关系：同一 UUID 重连时，反馈中心会主动踢掉旧连接。
+/// 同一台机器是否已有实例由 `run` 的运行锁把关：重复拉起时新进程会自行退出。
 /// 返回日志文件路径（拿不到时为 None），由调用方决定怎么呈现。
 pub fn spawn_background(server: &str) -> Result<Option<PathBuf>, String> {
     let exe = std::env::current_exe().map_err(|err| format!("无法定位当前可执行文件: {err}"))?;
@@ -124,6 +128,79 @@ pub fn spawn_background(server: &str) -> Result<Option<PathBuf>, String> {
 
 fn log_path() -> Option<PathBuf> {
     dirs::config_dir().map(|dir| dir.join("wtow").join("agent.log"))
+}
+
+fn lock_path() -> Option<PathBuf> {
+    dirs::config_dir().map(|dir| dir.join("wtow").join("agent.lock"))
+}
+
+/// 运行中的 Agent 信息（`pid server`）。锁文件在 Windows 上对被锁定的句柄不可读，
+/// 所以展示用的信息单独存一份；只有确认锁被持有时才读它。
+fn state_path() -> Option<PathBuf> {
+    dirs::config_dir().map(|dir| dir.join("wtow").join("agent.state"))
+}
+
+/// 已有反馈终端在运行时返回它记录的地址；没有则返回 None。
+///
+/// 以操作系统文件锁为准而不是 PID 文件：进程退出（包括被强杀）时锁会自动释放，
+/// 不会因为 PID 复用把无关进程误判成 Agent。
+pub fn running_server() -> Option<String> {
+    let path = lock_path()?;
+    let file = open_lock(&path).ok()?;
+    match file.try_lock() {
+        Ok(()) => {
+            let _ = file.unlock();
+            None
+        }
+        Err(TryLockError::WouldBlock) => Some(read_state_server()),
+        Err(TryLockError::Error(_)) => None,
+    }
+}
+
+/// 读取运行信息里 `pid server` 中的地址；读不到时给一个占位说法。
+fn read_state_server() -> String {
+    state_path()
+        .and_then(|path| fs::read_to_string(path).ok())
+        .and_then(|text| text.split_whitespace().nth(1).map(str::to_string))
+        .unwrap_or_else(|| "未知地址".to_string())
+}
+
+fn open_lock(path: &Path) -> std::io::Result<File> {
+    OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)
+}
+
+/// 获取单实例运行锁；被其他进程持有时返回错误，说明已有 Agent 在跑。
+fn acquire_lock(config: &AgentConfig) -> Result<File, String> {
+    let path = lock_path().ok_or("无法定位配置目录，无法创建运行锁")?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|err| format!("创建 {} 失败: {err}", parent.display()))?;
+    }
+    let file =
+        open_lock(&path).map_err(|err| format!("打开运行锁 {} 失败: {err}", path.display()))?;
+    match file.try_lock() {
+        Ok(()) => {}
+        Err(TryLockError::WouldBlock) => {
+            return Err(format!(
+                "已有反馈终端在运行（{}），如需切换服务端请先停掉它",
+                read_state_server()
+            ));
+        }
+        Err(TryLockError::Error(err)) => {
+            return Err(format!("锁定 {} 失败: {err}", path.display()));
+        }
+    }
+
+    // 锁的内容只用于诊断；写失败不影响 Agent 本身。
+    if let Some(state) = state_path() {
+        let _ = fs::write(state, format!("{} {}\n", std::process::id(), config.server));
+    }
+    Ok(file)
 }
 
 struct Upload {

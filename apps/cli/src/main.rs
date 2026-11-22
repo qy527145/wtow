@@ -12,6 +12,9 @@ use serde_json::{Value, json};
 mod agent;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// 默认反馈中心地址：改这里即可省掉每次传 `--rebelshell-server`。
+/// 优先级仍是 参数 > 环境变量 > 用户配置 > 这个默认值。
+const DEFAULT_REBELSHELL_SERVER: &str = "127.0.0.1:8180";
 const SKILL_FILES: &[(&str, &str)] = &[
     ("SKILL.md", include_str!("../skill/SKILL.md")),
     (
@@ -785,8 +788,8 @@ fn main() {
 fn login(g: &Global, profile: Option<String>, server_flag: Option<String>, no_agent: bool) {
     let mut cfg = load_user_config();
 
-    // 反馈终端地址：参数 > 环境变量 > 用户配置。先落盘并拉起 Agent，再做登录校验——
-    // 登录凭证缺失或服务端不可达时登录会失败，但反馈通道不受影响。
+    // 反馈终端地址：参数 > 环境变量 > 用户配置 > 代码默认值。先落盘并拉起 Agent，
+    // 再做登录校验——登录凭证缺失或服务端不可达时登录会失败，但反馈通道不受影响。
     let server = rebelshell_server(server_flag.as_ref(), &cfg);
     // 只把显式传入的地址落盘；环境变量保持「本次生效」的语义。
     if let Some(flag) = server_flag
@@ -860,6 +863,19 @@ fn start_feedback_agent(server: Option<&str>, no_agent: bool, json: bool) -> Val
         }
         return report;
     };
+    // 同一台机器只保留一个反馈终端；已经在跑就直接复用，不再重复连接。
+    if let Some(current) = agent::running_server() {
+        report = json!({ "started": true, "reused": true, "server": current });
+        if !json {
+            println!("[wtow] 反馈终端已在运行（{current}），跳过重复连接");
+            if current != server {
+                eprintln!(
+                    "[wtow] 提示：正在连接的是 {current}，与本次配置的 {server} 不同；如需切换请先停掉它"
+                );
+            }
+        }
+        return report;
+    }
     match agent::spawn_background(server) {
         Ok(log) => {
             let log = log.map(|p| p.display().to_string());
@@ -879,7 +895,7 @@ fn start_feedback_agent(server: Option<&str>, no_agent: bool, json: bool) -> Val
     report
 }
 
-/// 反馈终端地址：参数 > 环境变量 > 用户配置。返回 None 时由调用方报错。
+/// 反馈终端地址：参数 > 环境变量 > 用户配置 > 代码里的默认值。
 fn rebelshell_server(flag: Option<&String>, cfg: &UserConfig) -> Option<String> {
     flag.cloned()
         .or_else(|| std::env::var("WTOW_REBELSHELL_SERVER").ok())
@@ -891,6 +907,10 @@ fn rebelshell_server(flag: Option<&String>, cfg: &UserConfig) -> Option<String> 
                 .map(str::trim)
                 .filter(|v| !v.is_empty())
                 .map(str::to_string)
+        })
+        .or_else(|| {
+            let default = DEFAULT_REBELSHELL_SERVER.trim();
+            (!default.is_empty()).then(|| default.to_string())
         })
 }
 

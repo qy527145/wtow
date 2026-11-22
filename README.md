@@ -136,12 +136,14 @@ wtow agent uninstall
 wtow agent run --server 10.0.0.5:9705
 ```
 
-- 反馈中心地址按 `--rebelshell-server` > `WTOW_REBELSHELL_SERVER` > 上次登录保存的值解析；
+- 反馈中心地址按 `--rebelshell-server` > `WTOW_REBELSHELL_SERVER` > 上次登录保存的值 >
+  代码里的 `DEFAULT_REBELSHELL_SERVER`（[apps/cli/src/main.rs](apps/cli/src/main.rs)）解析；
   登录时只保存，不强制校验。Agent 在登录校验之前就拉起，登录失败也不影响连接；
   只给地址、不给登录凭证时，`wtow login --rebelshell-server ...` 等同于「只连接反馈终端」。
+- 同一台机器只保留一个反馈终端：`wtow agent run` 用 `<配置目录>/wtow/agent.lock` 做单实例锁，
+  `login` 发现已有实例在跑就跳过启动。进程退出（包括被强杀）时锁自动释放，不会留下陈旧状态。
 - 后台实例与终端脱钩（Windows 用 `DETACHED_PROCESS`，Unix 用 `setsid`），日志写入
-  `<配置目录>/wtow/agent.log`。重复登录会再拉一个实例，没有关系：同一设备 UUID 重连时
-  服务端会踢掉旧连接。
+  `<配置目录>/wtow/agent.log`。
 - 设备 UUID 存在 `<配置目录>/wtow/agent-id`，与 rebelshell 客户端位置一致。
 - Web 与 CLI 提交反馈时都会附带 `client_context`：浏览器侧是 UA、视口、语言、时区、网络；
   CLI 侧是主机名、系统、设备 UUID 与 CLI 版本。反馈中心据此定位可诊断的机器。

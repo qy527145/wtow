@@ -33,6 +33,9 @@ wtow exec edit <id> [--instruction I] [--priority P] [--target T]... [--notes N]
 wtow file get <ATT-id> [-o PATH]
 ```
 
+反馈终端：地址按 `--rebelshell-server` > `WTOW_REBELSHELL_SERVER` > 用户配置 > 代码默认值解析；
+同一台机器只保留一个实例，`login` 发现已在运行就跳过启动。
+
 附件：
 - 正文用 `![说明](ATT-xxx)` 引用附件；只能引用本作文（执行作文还包括其来源）的附件，否则退出码 6。
 - `submit` / `exec create` 的正文里写 `](./a.png)` 且同时 `--attach ./a.png`，会自动换成 `](ATT-xxx)`。
