@@ -137,7 +137,8 @@ wtow agent run --server 10.0.0.5:9705
 ```
 
 - 反馈中心地址按 `--rebelshell-server` > `WTOW_REBELSHELL_SERVER` > 上次登录保存的值解析；
-  登录时只保存，不强制校验。
+  登录时只保存，不强制校验。Agent 在登录校验之前就拉起，登录失败也不影响连接；
+  只给地址、不给登录凭证时，`wtow login --rebelshell-server ...` 等同于「只连接反馈终端」。
 - 后台实例与终端脱钩（Windows 用 `DETACHED_PROCESS`，Unix 用 `setsid`），日志写入
   `<配置目录>/wtow/agent.log`。重复登录会再拉一个实例，没有关系：同一设备 UUID 重连时
   服务端会踢掉旧连接。

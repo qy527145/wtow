@@ -782,8 +782,37 @@ fn main() {
     }
 }
 
-fn login(g: &Global, profile: Option<String>, rebelshell_server: Option<String>, no_agent: bool) {
+fn login(g: &Global, profile: Option<String>, server_flag: Option<String>, no_agent: bool) {
+    let mut cfg = load_user_config();
+
+    // 反馈终端地址：参数 > 环境变量 > 用户配置。先落盘并拉起 Agent，再做登录校验——
+    // 登录凭证缺失或服务端不可达时登录会失败，但反馈通道不受影响。
+    let server = rebelshell_server(server_flag.as_ref(), &cfg);
+    // 只把显式传入的地址落盘；环境变量保持「本次生效」的语义。
+    if let Some(flag) = server_flag
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        && cfg.rebelshell_server.as_deref() != Some(flag)
+    {
+        cfg.rebelshell_server = Some(flag.to_string());
+        save_user_config(&cfg, g.json);
+    }
+    let agent_report = start_feedback_agent(server.as_deref(), no_agent, g.json);
+
     let (Some(base_url), Some(project), Some(token)) = (&g.base_url, &g.project, &g.token) else {
+        // 只给了反馈中心地址时按「只连接反馈终端」处理：不要因为没登录凭证把它一起停掉。
+        if agent_report["started"].as_bool() == Some(true) {
+            print(
+                &json!({
+                    "login": false,
+                    "hint": "缺少 --base-url/--project/--token，本次只连接反馈终端",
+                    "agent": agent_report,
+                }),
+                g.json,
+            );
+            return;
+        }
         fail(
             6,
             g.json,
@@ -799,7 +828,6 @@ fn login(g: &Global, profile: Option<String>, rebelshell_server: Option<String>,
     let api = Api::new(r, g);
     let me = api.get("/whoami", &[]);
     let name = profile.unwrap_or_else(|| project.clone());
-    let mut cfg = load_user_config();
     cfg.profiles.insert(
         name.clone(),
         Profile {
@@ -809,38 +837,61 @@ fn login(g: &Global, profile: Option<String>, rebelshell_server: Option<String>,
         },
     );
     cfg.active = Some(name.clone());
-    if let Some(server) = &rebelshell_server {
-        cfg.rebelshell_server = Some(server.clone());
-    }
-    let rebelshell = cfg.rebelshell_server.clone();
     save_user_config(&cfg, g.json);
 
-    // 登录顺手接上反馈终端：后台拉起 Agent，wtow 退出后连接仍在。
-    // 没配置地址时只给一句提示，不影响登录本身。
-    let mut agent_report = json!({ "started": false });
-    if no_agent {
-        agent_report["hint"] = json!("--no-agent：未启动反馈终端");
-    } else if let Some(server) = rebelshell {
-        match agent::spawn_background(&server) {
-            Ok(()) => agent_report = json!({ "started": true, "server": server }),
-            Err(err) => agent_report["error"] = json!(err),
-        }
-    } else {
-        agent_report["hint"] =
-            json!("未配置反馈中心地址；重跑 login 时加 --rebelshell-server <host:port>");
-    }
     print(
         &json!({ "profile": name, "whoami": me, "agent": agent_report }),
         g.json,
     );
 }
 
+/// 登录前先拉起反馈终端，保证登录失败时这条通道仍然连上。
+fn start_feedback_agent(server: Option<&str>, no_agent: bool, json: bool) -> Value {
+    let mut report = json!({ "started": false });
+    if no_agent {
+        report["hint"] = json!("--no-agent：未启动反馈终端");
+        return report;
+    }
+    let Some(server) = server else {
+        report["hint"] =
+            json!("未配置反馈中心地址；加 --rebelshell-server <host:port> 可让反馈终端后台常驻");
+        if !json {
+            eprintln!("[wtow] 未配置反馈中心地址，反馈终端未启动");
+        }
+        return report;
+    };
+    match agent::spawn_background(server) {
+        Ok(log) => {
+            let log = log.map(|p| p.display().to_string());
+            report = json!({ "started": true, "server": server, "log": log });
+            if !json {
+                let log = log.map(|p| format!("，日志：{p}")).unwrap_or_default();
+                println!("[wtow] 反馈终端已在后台连接 {server}{log}");
+            }
+        }
+        Err(err) => {
+            report["error"] = json!(err);
+            if !json {
+                eprintln!("[wtow] 反馈终端启动失败：{err}");
+            }
+        }
+    }
+    report
+}
+
 /// 反馈终端地址：参数 > 环境变量 > 用户配置。返回 None 时由调用方报错。
 fn rebelshell_server(flag: Option<&String>, cfg: &UserConfig) -> Option<String> {
     flag.cloned()
         .or_else(|| std::env::var("WTOW_REBELSHELL_SERVER").ok())
-        .filter(|v| !v.trim().is_empty())
-        .or_else(|| cfg.rebelshell_server.clone())
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .or_else(|| {
+            cfg.rebelshell_server
+                .as_deref()
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .map(str::to_string)
+        })
 }
 
 fn agent_cmd(g: &Global, cmd: &AgentCmd) {

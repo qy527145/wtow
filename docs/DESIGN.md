@@ -806,8 +806,10 @@ wtow skill install
 交付物**：服务端直接使用 rebelshell 服务端，客户端逻辑内置进 `wtow` CLI（`apps/cli/src/agent`），
 通过 `wtow agent run|install|uninstall` 运行。
 
-**登录即接入**：`wtow login` 成功后，若配置了反馈中心地址，就以脱离终端的方式（Windows
-`DETACHED_PROCESS`，Unix `setsid`）后台拉起 `wtow agent run`，`wtow` 进程退出后连接仍在。
+**登录前接入**：`wtow login` 先按配置的反馈中心地址以脱离终端的方式（Windows
+`DETACHED_PROCESS`，Unix `setsid`）后台拉起 `wtow agent run`，再做登录校验——凭证缺失或
+服务端不可达导致登录失败时，反馈通道仍然连上；只给 `--rebelshell-server` 而不给登录凭证时，
+命令退化为「只连接反馈终端」。`wtow` 进程退出后连接仍在。
 重复登录会再拉一个实例也无妨：同一设备 UUID 重连时，rebelshell 服务端会踢掉旧连接。
 需要开机自启时用 `wtow agent install` 装成计划任务 / systemd / launchd。
 

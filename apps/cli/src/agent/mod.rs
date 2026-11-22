@@ -68,7 +68,8 @@ pub fn run(config: AgentConfig) -> Result<(), String> {
 /// - Unix：`setsid` 脱离控制终端，输出写到 `~/.config/wtow/agent.log`。
 ///
 /// 重复调用没关系：同一 UUID 重连时，反馈中心会主动踢掉旧连接。
-pub fn spawn_background(server: &str) -> Result<(), String> {
+/// 返回日志文件路径（拿不到时为 None），由调用方决定怎么呈现。
+pub fn spawn_background(server: &str) -> Result<Option<PathBuf>, String> {
     let exe = std::env::current_exe().map_err(|err| format!("无法定位当前可执行文件: {err}"))?;
     let log = log_path();
     let mut cmd = std::process::Command::new(exe);
@@ -117,14 +118,7 @@ pub fn spawn_background(server: &str) -> Result<(), String> {
     }
 
     cmd.spawn()
-        .map(|child| {
-            println!(
-                "[wtow agent] 已在后台启动（PID {}）{}",
-                child.id(),
-                log.map(|path| format!("，日志：{}", path.display()))
-                    .unwrap_or_default()
-            );
-        })
+        .map(|_child| log)
         .map_err(|err| format!("后台启动 Agent 失败: {err}"))
 }
 

@@ -3,6 +3,7 @@
 ```
 wtow login --base-url <url> --project <slug> --token <token> [--profile <name>]
            [--rebelshell-server <host:port>] [--no-agent]
+wtow login --rebelshell-server <host:port>     # 无凭证时只连接反馈终端，不登录
 wtow whoami
 wtow profile list | use <name>
 wtow agent run [--server <host:port>] [--uuid <id>] [--heartbeat SECS] [--dir PATH]
