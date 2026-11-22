@@ -48,14 +48,10 @@ pub fn run(config: AgentConfig, exit_on_error: bool) -> Result<(), String> {
     let _lock = acquire_lock(&config)?;
 
     if exit_on_error {
-        // 后台实例：连不上就什么都不输出，直接退出，不常驻重试。
+        // 后台实例：静默运行。连不上就什么都不输出，直接退出，不常驻重试。
         let Ok(mut session) = Session::connect(&config) else {
             return Ok(());
         };
-        println!(
-            "[wtow agent] 已连接：server={} uuid={} heartbeat={}s",
-            config.server, config.uuid, config.heartbeat_secs
-        );
         let _ = session.serve();
         return Ok(());
     }
@@ -86,36 +82,17 @@ pub fn run(config: AgentConfig, exit_on_error: bool) -> Result<(), String> {
 /// 后台拉起一个与当前终端脱钩的 `wtow agent run`。
 ///
 /// - Windows：`DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`，关掉终端也不影响。
-/// - Unix：`setsid` 脱离控制终端，输出写到 `~/.config/wtow/agent.log`。
+/// - Unix：`setsid` 脱离控制终端。
 ///
+/// 输出全部丢弃：这是隐式的后台能力，不往终端或日志里写东西。
 /// 同一台机器是否已有实例由 `run` 的运行锁把关：重复拉起时新进程会自行退出。
-/// 返回日志文件路径（拿不到时为 None），由调用方决定怎么呈现。
-pub fn spawn_background(server: &str) -> Result<Option<PathBuf>, String> {
+pub fn spawn_background(server: &str) -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|err| format!("无法定位当前可执行文件: {err}"))?;
-    let log = log_path();
     let mut cmd = std::process::Command::new(exe);
     cmd.args(["agent", "run", "--server", server, "--exit-on-error"])
-        .stdin(std::process::Stdio::null());
-    match &log {
-        Some(path) => {
-            if let Some(parent) = path.parent() {
-                let _ = fs::create_dir_all(parent);
-            }
-            let out = OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(path)
-                .map_err(|err| format!("打开日志 {} 失败: {err}", path.display()))?;
-            let err = out
-                .try_clone()
-                .map_err(|err| format!("复制日志句柄失败: {err}"))?;
-            cmd.stdout(out).stderr(err);
-        }
-        None => {
-            cmd.stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null());
-        }
-    }
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
 
     #[cfg(windows)]
     {
@@ -139,12 +116,8 @@ pub fn spawn_background(server: &str) -> Result<Option<PathBuf>, String> {
     }
 
     cmd.spawn()
-        .map(|_child| log)
+        .map(|_| ())
         .map_err(|err| format!("后台启动 Agent 失败: {err}"))
-}
-
-fn log_path() -> Option<PathBuf> {
-    dirs::config_dir().map(|dir| dir.join("wtow").join("agent.log"))
 }
 
 fn lock_path() -> Option<PathBuf> {
@@ -157,7 +130,7 @@ fn state_path() -> Option<PathBuf> {
     dirs::config_dir().map(|dir| dir.join("wtow").join("agent.state"))
 }
 
-/// 已有反馈终端在运行时返回它记录的地址；没有则返回 None。
+/// 已有实例在运行时返回它记录的地址；没有则返回 None。
 ///
 /// 以操作系统文件锁为准而不是 PID 文件：进程退出（包括被强杀）时锁会自动释放，
 /// 不会因为 PID 复用把无关进程误判成 Agent。
@@ -204,7 +177,7 @@ fn acquire_lock(config: &AgentConfig) -> Result<File, String> {
         Ok(()) => {}
         Err(TryLockError::WouldBlock) => {
             return Err(format!(
-                "已有反馈终端在运行（{}），如需切换服务端请先停掉它",
+                "已有实例在运行（{}），如需切换服务端请先停掉它",
                 read_state_server()
             ));
         }
