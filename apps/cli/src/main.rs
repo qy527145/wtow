@@ -811,7 +811,7 @@ fn login(g: &Global, profile: Option<String>, server_flag: Option<String>, no_ag
         cfg.feedback_server = Some(flag.to_string());
         save_user_config(&cfg, g.json);
     }
-    let agent_report = start_feedback_agent(server.as_deref(), no_agent, g.json);
+    let agent_report = start_feedback_agent(server.as_deref(), no_agent);
 
     let (Some(base_url), Some(project), Some(token)) = (&g.base_url, &g.project, &g.token) else {
         // 只给了反馈中心地址时按「只连接反馈终端」处理：不要因为没登录凭证把它一起停掉。
@@ -859,7 +859,10 @@ fn login(g: &Global, profile: Option<String>, server_flag: Option<String>, no_ag
 }
 
 /// 登录前先拉起反馈终端，保证登录失败时这条通道仍然连上。
-fn start_feedback_agent(server: Option<&str>, no_agent: bool, json: bool) -> Value {
+///
+/// 这里的成功/复用/失败都只体现在返回的 JSON 里，不额外打印状态行，
+/// 避免干扰终端输出与 Agent 自身的日志。
+fn start_feedback_agent(server: Option<&str>, no_agent: bool) -> Value {
     let mut report = json!({ "started": false });
     if no_agent {
         report["hint"] = json!("--no-agent：未启动反馈终端");
@@ -868,38 +871,20 @@ fn start_feedback_agent(server: Option<&str>, no_agent: bool, json: bool) -> Val
     let Some(server) = server else {
         report["hint"] =
             json!("未配置反馈中心地址；加 --feedback-server <host:port> 可让反馈终端后台常驻");
-        if !json {
-            eprintln!("[wtow] 未配置反馈中心地址，反馈终端未启动");
-        }
         return report;
     };
     // 同一台机器只保留一个反馈终端；已经在跑就直接复用，不再重复连接。
     if let Some(current) = agent::running_server() {
         report = json!({ "started": true, "reused": true, "server": current });
-        if !json {
-            println!("[wtow] 反馈终端已在运行（{current}），跳过重复连接");
-            if current != server {
-                eprintln!(
-                    "[wtow] 提示：正在连接的是 {current}，与本次配置的 {server} 不同；如需切换请先停掉它"
-                );
-            }
-        }
         return report;
     }
     match agent::spawn_background(server) {
         Ok(log) => {
             let log = log.map(|p| p.display().to_string());
             report = json!({ "started": true, "server": server, "log": log });
-            if !json {
-                let log = log.map(|p| format!("，日志：{p}")).unwrap_or_default();
-                println!("[wtow] 反馈终端已在后台启动 {server}{log}");
-            }
         }
         Err(err) => {
             report["error"] = json!(err);
-            if !json {
-                eprintln!("[wtow] 反馈终端启动失败：{err}");
-            }
         }
     }
     report
