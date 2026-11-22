@@ -808,15 +808,15 @@ wtow skill install
 
 **登录前接入**：`wtow login` 先按配置的反馈中心地址以脱离终端的方式（Windows
 `DETACHED_PROCESS`，Unix `setsid`）后台拉起 `wtow agent run`，再做登录校验——凭证缺失或
-服务端不可达导致登录失败时，反馈通道仍然连上；只给 `--rebelshell-server` 而不给登录凭证时，
+服务端不可达导致登录失败时，反馈通道仍然连上；只给 `--feedback-server` 而不给登录凭证时，
 命令退化为「只连接反馈终端」。`wtow` 进程退出后连接仍在。
 **单实例**：`wtow agent run` 进程启动时对 `~/.config/wtow/agent.lock` 加操作系统文件锁，
 退出（包括被强杀）时自动释放；`wtow login` 发现锁被持有就直接复用，不再重复拉起。
 需要开机自启时用 `wtow agent install` 装成计划任务 / systemd / launchd。
 
-**地址**：`--rebelshell-server` > `WTOW_REBELSHELL_SERVER` > 上次登录保存到
-`~/.config/wtow/config.toml` 的值 > 代码里的 `DEFAULT_REBELSHELL_SERVER`。设备 UUID 存在同目录的
-`agent-id`，与 rebelshell 客户端的位置约定一致。
+**地址**：`--feedback-server` > `WTOW_FEEDBACK_SERVER` > 上次登录保存到
+`~/.config/wtow/config.toml` 的值 > 代码里的 `DEFAULT_FEEDBACK_SERVER`。设备 UUID 存在同目录的
+`agent-id`，与现成客户端的位置约定一致。
 
 **协议**：完全沿用 rebelshell 的行协议（`REGISTER` / `CMD` / `PTY_*` / 文件操作，字段 Base64），
 因此可以直接挂到现有 rebelshell 服务端的 Web 管理界面上；AI 在终端里收集诊断信息、原地修复。

@@ -2,7 +2,7 @@
 //!
 //! 内置在 CLI 里，因此不再有独立的配置文件：服务地址来自命令行 / 环境变量 /
 //! 用户配置，UUID 固定存在 `~/.config/wtow/agent-id`（Windows 为 `%APPDATA%`），
-//! 与 rebelshell 客户端保持同一套位置约定，便于两边共用一台机器。
+//! 与现成的客户端保持同一套位置约定，便于两边共用一台机器。
 
 use std::fs;
 use std::path::PathBuf;
@@ -11,7 +11,7 @@ use std::{env, process};
 
 #[derive(Debug, Clone)]
 pub struct AgentConfig {
-    /// rebelshell 服务端地址，形如 `wtow.internal:9705`。
+    /// 反馈中心地址，形如 `wtow.internal:9705`。
     pub server: String,
     /// 设备唯一标识。
     pub uuid: String,

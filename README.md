@@ -12,7 +12,7 @@ apps/server/      HTTP 服务；src/api/ 按领域分模块，src/config.rs 统�
 apps/web/         Web 管理台（React 19 + Vite + Tailwind CSS 4 + Radix UI），
                   构建产物 apps/web/dist 由 rust-embed 打进服务端二进制
 apps/cli/         wtow 命令行，Skill 文件在 apps/cli/skill 下，编译时打进二进制；
-                  src/agent/ 是内置的反馈终端通道（直接复用 rebelshell 协议）
+                  src/agent/ 是内置的反馈终端通道（复用现成的客户端协议）
 crates/contract/  服务端与 CLI 共用的 DTO 和错误码，也是前端 TS 类型的来源
 packages/ui/      Web 组件库
 packages/shared/  TS 类型，src/bindings 由 ts-rs 从 crates/contract 生成
@@ -119,14 +119,14 @@ CLI 读取配置的优先级：命令行参数 > 环境变量（`WTOW_BASE_URL` 
 
 ## 反馈终端（内置在 CLI 里）
 
-反馈中心不仅能收反馈，还能在同一条通道上连回出问题的那台机器。这条通道直接复刻
-rebelshell 客户端的协议与实现，**内置在 `wtow` 可执行文件里**，不需要再分发第二个二进制；
-服务端就是现成的 rebelshell 服务端。
+反馈中心不仅能收反馈，还能在同一条通道上连回出问题的那台机器。这条通道的协议与实现
+**内置在 `wtow` 可执行文件里**，不需要再分发第二个二进制；服务端直接接现成的反馈中心
+服务端，协议细节见 `docs/DESIGN.md`。
 
 ```bash
 # 登录时顺手把 Agent 拉到后台（wtow 退出后连接仍在）
 wtow login --base-url https://wtow.internal --project demo --token wtow_pat_xxx \
-           --rebelshell-server 10.0.0.5:9705
+           --feedback-server 10.0.0.5:9705
 
 # 需要开机自启时，再装成后台服务（Windows 需管理员，Linux 需 root）
 wtow agent install --server 10.0.0.5:9705
@@ -136,15 +136,15 @@ wtow agent uninstall
 wtow agent run --server 10.0.0.5:9705
 ```
 
-- 反馈中心地址按 `--rebelshell-server` > `WTOW_REBELSHELL_SERVER` > 上次登录保存的值 >
-  代码里的 `DEFAULT_REBELSHELL_SERVER`（[apps/cli/src/main.rs](apps/cli/src/main.rs)）解析；
+- 反馈中心地址按 `--feedback-server` > `WTOW_FEEDBACK_SERVER` > 上次登录保存的值 >
+  代码里的 `DEFAULT_FEEDBACK_SERVER`（[apps/cli/src/main.rs](apps/cli/src/main.rs)）解析；
   登录时只保存，不强制校验。Agent 在登录校验之前就拉起，登录失败也不影响连接；
-  只给地址、不给登录凭证时，`wtow login --rebelshell-server ...` 等同于「只连接反馈终端」。
+  只给地址、不给登录凭证时，`wtow login --feedback-server ...` 等同于「只连接反馈终端」。
 - 同一台机器只保留一个反馈终端：`wtow agent run` 用 `<配置目录>/wtow/agent.lock` 做单实例锁，
   `login` 发现已有实例在跑就跳过启动。进程退出（包括被强杀）时锁自动释放，不会留下陈旧状态。
 - 后台实例与终端脱钩（Windows 用 `DETACHED_PROCESS`，Unix 用 `setsid`），日志写入
   `<配置目录>/wtow/agent.log`。
-- 设备 UUID 存在 `<配置目录>/wtow/agent-id`，与 rebelshell 客户端位置一致。
+- 设备 UUID 存在 `<配置目录>/wtow/agent-id`，与现成客户端的位置约定一致。
 - Web 与 CLI 提交反馈时都会附带 `client_context`：浏览器侧是 UA、视口、语言、时区、网络；
   CLI 侧是主机名、系统、设备 UUID 与 CLI 版本。反馈中心据此定位可诊断的机器。
 

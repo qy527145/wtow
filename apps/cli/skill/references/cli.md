@@ -2,8 +2,8 @@
 
 ```
 wtow login --base-url <url> --project <slug> --token <token> [--profile <name>]
-           [--rebelshell-server <host:port>] [--no-agent]
-wtow login --rebelshell-server <host:port>     # 无凭证时只连接反馈终端，不登录
+           [--feedback-server <host:port>] [--no-agent]
+wtow login --feedback-server <host:port>     # 无凭证时只连接反馈终端，不登录
 wtow whoami
 wtow profile list | use <name>
 wtow agent run [--server <host:port>] [--uuid <id>] [--heartbeat SECS] [--dir PATH]
@@ -33,7 +33,7 @@ wtow exec edit <id> [--instruction I] [--priority P] [--target T]... [--notes N]
 wtow file get <ATT-id> [-o PATH]
 ```
 
-反馈终端：地址按 `--rebelshell-server` > `WTOW_REBELSHELL_SERVER` > 用户配置 > 代码默认值解析；
+反馈终端：地址按 `--feedback-server` > `WTOW_FEEDBACK_SERVER` > 用户配置 > 代码默认值解析；
 同一台机器只保留一个实例，`login` 发现已在运行就跳过启动。
 
 附件：
