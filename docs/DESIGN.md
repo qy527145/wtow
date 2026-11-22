@@ -106,8 +106,8 @@ wtow/
 │   │   └── assets/            # install.sh / install.ps1 / download.html
 │   ├── web/                   # React SPA，构建产物 dist/ 嵌入服务端
 │   └── cli/                   # ── CLI（独立发布）──
-│       ├── src/main.rs
-│       └── skill/             # SKILL.md + references/*.md（include_str!）
+│       └── src/main.rs
+├── skills/wtow/               # Skill 源文件：SKILL.md + references + bin/<platform>/
 ├── crates/contract/           # 仅 wire 类型与错误码，也是 TS 类型的来源（ts-rs）
 ├── packages/
 │   ├── ui/                    # Web 组件库
@@ -684,7 +684,9 @@ wtow exec complete EXEC-2011 --notes "..." --link "https://git.internal/pull/88"
 
 ### 11.4 Skill 分发
 
-Skill 文件用 `include_str!` 编进二进制，`wtow skill install` 写到 `~/.claude/skills/wtow/`（或 `./.claude/skills/wtow/`）。SKILL.md 内容见 PRD 第 6 节，CLI 升级时 Skill 同步更新。
+Skill 以仓库根的 `skills/wtow/` 为源：`SKILL.md`、`references/*.md`，以及 `bin/<platform>/wtow[.exe]`。
+Markdown 用 `include_str!` 编进二进制，`wtow skill install` 写到 `~/.claude/skills/wtow/`（或 `./.claude/skills/wtow/`），并把当前可执行文件复制进 `<skill>/bin/<platform>/`，使 Skill 自包含。
+跨平台分发走开放的 skills 生态：`npx skills add <owner>/<repo>@wtow` 会把整个 `skills/wtow/` 装到目标 Agent 的 skills 目录；`bun run build:cli` 负责产出各平台二进制。SKILL.md 内容见 PRD 第 6 节，CLI 升级时 Skill 同步更新。
 
 ---
 

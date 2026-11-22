@@ -16,22 +16,22 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// 优先级仍是 参数 > 环境变量 > 用户配置 > 这个默认值。
 const DEFAULT_FEEDBACK_SERVER: &str = "127.0.0.1:8180";
 const SKILL_FILES: &[(&str, &str)] = &[
-    ("SKILL.md", include_str!("../skill/SKILL.md")),
+    ("SKILL.md", include_str!("../../../skills/wtow/SKILL.md")),
     (
         "references/assigner.md",
-        include_str!("../skill/references/assigner.md"),
+        include_str!("../../../skills/wtow/references/assigner.md"),
     ),
     (
         "references/developer.md",
-        include_str!("../skill/references/developer.md"),
+        include_str!("../../../skills/wtow/references/developer.md"),
     ),
     (
         "references/tester.md",
-        include_str!("../skill/references/tester.md"),
+        include_str!("../../../skills/wtow/references/tester.md"),
     ),
     (
         "references/cli.md",
-        include_str!("../skill/references/cli.md"),
+        include_str!("../../../skills/wtow/references/cli.md"),
     ),
 ];
 
@@ -1107,10 +1107,58 @@ fn skill_install(g: &Global, scope: &str, dir: Option<&Path>) {
             fail(1, g.json, "IO", &format!("{}: {e}", p.display()));
         }
     }
+
+    // Skill 自带 CLI：把正在运行的自己复制进 <skill>/bin/<platform>/，Agent 不必依赖 PATH。
+    let binary = root
+        .join("bin")
+        .join(skill_platform())
+        .join(format!("wtow{}", std::env::consts::EXE_SUFFIX));
+    if let Err(e) = copy_current_exe(&binary) {
+        fail(1, g.json, "IO", &format!("{}: {e}", binary.display()));
+    }
     print(
-        &json!({ "installed": root.display().to_string(), "files": SKILL_FILES.len() }),
+        &json!({
+            "installed": root.display().to_string(),
+            "files": SKILL_FILES.len() + 1,
+            "binary": binary.display().to_string(),
+        }),
         g.json,
     );
+}
+
+/// 与 `scripts/build-cli.ts` 的平台目录保持一致，SKILL.md 按同一张表选可执行文件。
+fn skill_platform() -> String {
+    let os = if std::env::consts::OS == "macos" {
+        "macos"
+    } else {
+        std::env::consts::OS
+    };
+    let arch = match std::env::consts::ARCH {
+        "x86_64" => "x64",
+        "aarch64" => "arm64",
+        other => other,
+    };
+    format!("{os}-{arch}")
+}
+
+/// 先写临时文件再改名，避免安装中断留下半个可执行文件。
+fn copy_current_exe(dest: &Path) -> std::io::Result<()> {
+    let src = std::env::current_exe()?;
+    if src.canonicalize()? == dest.canonicalize().unwrap_or_default() {
+        return Ok(());
+    }
+    let parent = dest
+        .parent()
+        .expect("skill binary path always has a parent");
+    std::fs::create_dir_all(parent)?;
+    let tmp = dest.with_extension("tmp");
+    std::fs::copy(&src, &tmp)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))?;
+    }
+    std::fs::rename(&tmp, dest)
 }
 
 fn raw_cmd(api: &Api, cmd: &RawCmd) -> Value {

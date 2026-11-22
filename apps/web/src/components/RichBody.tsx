@@ -24,7 +24,7 @@ type Token =
 
 /**
  * 正文只认两种标记：`![说明](ATT-xxx 或 URL)` 和 `[文字](URL)`，其余原样保留。
- * 这是 CLI 与 Skill 约定的引用格式（见 cli/skill/references/cli.md），不引入完整 Markdown。
+ * 这是 CLI 与 Skill 约定的引用格式（见 skills/wtow/references/cli.md），不引入完整 Markdown。
  */
 function tokenize(src: string): Token[] {
   const re = /(!?)\[([^\]\n]*)\]\(([^)\s]+)\)|(https?:\/\/[^\s<>()（）]+)/g;

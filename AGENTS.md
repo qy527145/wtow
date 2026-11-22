@@ -18,7 +18,7 @@ release 编译期嵌入服务端二进制（`rust-embed`），生产只部署一
 | `apps/server/src/app.rs`    | 根 Router：挂 `/api/v1`、`/healthz`、安装/下载链路、SPA fallback                           |
 | `apps/server/src/config.rs` | **唯一**读取环境变量的地方                                                                 |
 | `apps/server/src/error.rs`  | `AppError` → 统一 JSON 错误响应，错误码常量在 `crates/contract/src/error.rs`               |
-| `apps/cli/`                 | `wtow` 命令行；`skill/` 下的 Skill 文件编译时打进二进制；`src/agent/` 是内置的反馈终端通道（复用现成的客户端协议） |
+| `apps/cli/`                 | `wtow` 命令行；Skill 源文件在仓库根的 `skills/wtow/`，编译时打进二进制；`src/agent/` 是内置的反馈终端通道（复用现成的客户端协议） |
 | `crates/contract/`          | 服务端与 CLI 共用的 DTO / 错误码，也是 TS 类型的来源                                       |
 | `apps/web/`                 | React 19 + Vite 8 + Tailwind v4，设计令牌在 `src/index.css` 的 `@theme`                    |
 | `packages/ui/`              | 「蓝铅笔」组件库（源码级消费，无需 build）                                                 |
@@ -32,7 +32,7 @@ release 编译期嵌入服务端二进制（`rust-embed`），生产只部署一
 bun run init         # 安装依赖 + 准备 .env.local（幂等）
 bun run dev          # 起 Postgres，再同时起 Vite (WEB_PORT) 与 axum (WTOW_BIND)，Vite 代理 /api
 bun run build        # 当前平台单二进制 → dist/
-bun run build:cli    # CLI 分发包（Windows + Linux 归档 + sha256）→ dist/cli/
+bun run build:cli    # 构建各平台 CLI 到 skills/wtow/bin/（Skill 自包含，供 npx skills add）
 bun run build:web    # 只构建前端到 apps/web/dist
 bun run gen:types    # 从 crates/contract 重新生成 packages/shared/src/bindings
 bun run check        # biome + 类型漂移检查 + tsc + cargo fmt --check + clippy -D warnings

@@ -11,7 +11,7 @@ apps/server/      HTTP 服务；src/api/ 按领域分模块，src/config.rs 统�
                   migrations/ 是数据库迁移，assets/ 是安装脚本与下载页
 apps/web/         Web 管理台（React 19 + Vite + Tailwind CSS 4 + Radix UI），
                   构建产物 apps/web/dist 由 rust-embed 打进服务端二进制
-apps/cli/         wtow 命令行，Skill 文件在 apps/cli/skill 下，编译时打进二进制；
+apps/cli/         wtow 命令行，Skill 文件在仓库根的 skills/wtow 下，编译时打进二进制；
                   src/agent/ 是内置的反馈终端通道（复用现成的客户端协议）
 crates/contract/  服务端与 CLI 共用的 DTO 和错误码，也是前端 TS 类型的来源
 packages/ui/      Web 组件库
@@ -60,6 +60,7 @@ bun run smoke
 | `bun run build`                                   | 构建前端并编译出当前平台的服务端单二进制到 `dist/`       |
 | `bun run build:linux` / `build:win` / `build:mac` | 交叉编译服务端，限制见 `scripts/build.ts`                |
 | `bun run build:web`                               | 只构建前端到 `apps/web/dist`                             |
+| `bun run build:cli`                               | 构建各平台 CLI 到 `skills/wtow/bin/`，供 Skill 分发      |
 | `bun run gen:types`                               | 从 `crates/contract` 生成 `packages/shared/src/bindings` |
 | `bun run check`                                   | biome、类型漂移检查、tsc、cargo fmt、clippy              |
 | `bun run test`                                    | cargo test 与 bun test                                   |
@@ -115,7 +116,7 @@ bun run smoke
    wtow whoami
    ```
 
-CLI 读取配置的优先级：命令行参数 > 环境变量（`WTOW_BASE_URL` / `WTOW_PROJECT` / `WTOW_TOKEN`）> 仓库内的 `.wtow.toml` > 用户配置中当前启用的 profile。完整命令和退出码见 `apps/cli/skill/references/cli.md`。
+CLI 读取配置的优先级：命令行参数 > 环境变量（`WTOW_BASE_URL` / `WTOW_PROJECT` / `WTOW_TOKEN`）> 仓库内的 `.wtow.toml` > 用户配置中当前启用的 profile。完整命令和退出码见 `skills/wtow/references/cli.md`。
 
 ## 反馈终端（内置在 CLI 里）
 

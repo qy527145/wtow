@@ -356,14 +356,21 @@ WTOW 的动作面很窄，但顺序有讲究（先查 `related` 再拆、先认�
 ```
 wtow-skill/
 ├── SKILL.md              # 入口：触发条件、前置检查、通用红线
-└── references/
-    ├── tester.md         # 提交原始作文
-    ├── assigner.md       # 去重 / 合并 / 拆分
-    ├── developer.md      # 领取与完成
-    └── cli.md            # 完整命令与退出码
+├── references/
+│   ├── tester.md         # 提交原始作文
+│   ├── assigner.md       # 去重 / 合并 / 拆分
+│   ├── developer.md      # 领取与完成
+│   └── cli.md            # 完整命令与退出码
+└── bin/
+    ├── windows-x64/wtow.exe
+    ├── linux-x64/wtow
+    ├── linux-arm64/wtow
+    ├── macos-arm64/wtow
+    └── macos-x64/wtow
 ```
 
-随 CLI 一起分发，`wtow skill install` 拷贝到 `~/.claude/skills/wtow/`（`--scope project` 则装到项目内；其他客户端用 `--dir ~/.carter/skills` 之类指定 skills 目录，装到 `<dir>/wtow/`）。
+Skill 自包含 CLI：`SKILL.md` 按当前平台选择 `bin/<platform>/wtow`，Agent 不依赖 PATH 上的 `wtow`。
+分发走开放的 skills 生态（`npx skills add <owner>/<repo>@wtow`，装到各 Agent 的 skills 目录），也可以由 `wtow skill install` 装到 `~/.claude/skills/wtow/`（`--scope project` 则装到项目内；其他客户端用 `--dir ~/.carter/skills` 之类指定 skills 目录，装到 `<dir>/wtow/`）。`wtow skill install` 会连同当前可执行文件一起复制，保证装入的 Skill 同样自包含。
 
 ### 6.3 SKILL.md
 

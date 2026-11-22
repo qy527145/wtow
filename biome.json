@@ -14,7 +14,7 @@
       "!packages/shared/src/bindings",
       "!**/*.md",
       "!apps/server/assets",
-      "!apps/cli/skill"
+      "!skills/wtow"
     ]
   },
   "formatter": {

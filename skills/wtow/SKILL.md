@@ -4,6 +4,23 @@ description: 读写 WTOW 小作文托管平台。当用户要提交问题反馈/
   把反馈拆成开发任务、或领取/完成开发任务时使用。
 ---
 
+## 运行 CLI
+
+本 Skill 自带 `wtow`，不需要全局安装。先按当前平台选中本 Skill 目录下的可执行文件
+（Claude Code 会把 `${CLAUDE_SKILL_DIR}` 展开为 skill 目录；其他客户端用实际安装路径替换）：
+
+| 平台 | 可执行文件 |
+| --- | --- |
+| Windows x64 | `${CLAUDE_SKILL_DIR}/bin/windows-x64/wtow.exe` |
+| Linux x64 | `${CLAUDE_SKILL_DIR}/bin/linux-x64/wtow` |
+| Linux arm64 | `${CLAUDE_SKILL_DIR}/bin/linux-arm64/wtow` |
+| macOS Apple Silicon | `${CLAUDE_SKILL_DIR}/bin/macos-arm64/wtow` |
+| macOS Intel | `${CLAUDE_SKILL_DIR}/bin/macos-x64/wtow` |
+
+下文以及 `references/` 中的 `wtow` 都指选中的这个路径。Unix 上首次运行若报
+Permission denied，先对该文件执行 `chmod +x`。
+若 `bin/` 下没有当前平台的二进制（例如旧版本只装了 Markdown），回退到 PATH 上的 `wtow`。
+
 ## 前置检查
 1. 运行 `wtow whoami --json`。退出码 2 表示未登录：提示用户执行
    `wtow login --base-url <url> --project <slug> --token <token>`，不要猜测地址。
