@@ -138,8 +138,15 @@ export const api = {
     description: string,
     tags: string[],
     attachment_ids: string[] = [],
+    client_context: Record<string, unknown> = {},
   ) =>
-    request<RawComposition>("POST", `${p(slug)}/raw`, { title, description, tags, attachment_ids }),
+    request<RawComposition>("POST", `${p(slug)}/raw`, {
+      title,
+      description,
+      tags,
+      attachment_ids,
+      client_context,
+    }),
   uploadFile: async (slug: string, file: File): Promise<Attachment> => {
     const fd = new FormData();
     fd.append("file", file, file.name);

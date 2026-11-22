@@ -19,8 +19,24 @@ serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
 
+# 内置的交互式终端需要平台原语：Windows 的 ConPTY、Unix 的 pty。
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Console",
+    "Win32_System_IO",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+# forbid 会让 FFI 与 PTY 模块无法编译；改为 deny，只在这两个模块里局部放行。
 [lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "deny"
 
 [lints.clippy]
 all = { level = "warn", priority = -1 }

@@ -17,6 +17,7 @@ use crate::state::AppState;
 
 const RAW_COLS: &str = "r.id, r.title, r.description, r.tags, r.status::text AS status, r.reporter_id,
     r.claimed_by, r.claimed_at, r.merged_into_id, r.triage_reason, r.version, r.created_at, r.updated_at,
+    r.client_context,
     COALESCE((SELECT CASE
         WHEN count(*) FILTER (WHERE e.status <> 'Cancelled') = 0 THEN 'cancelled'
         WHEN bool_and(e.status IN ('Done','Cancelled')) THEN 'delivered'
@@ -69,6 +70,7 @@ fn raw_from_row(row: &PgRow) -> RawComposition {
             _ => Delivery::None,
         },
         attachments: Vec::new(),
+        client_context: row.get("client_context"),
     }
 }
 
@@ -166,8 +168,8 @@ pub async fn submit(
     let mut tx = st.db.begin().await?;
     let (id, seq) = next_id(&mut tx, ctx.project_id, "raw").await?;
     sqlx::query(
-        "INSERT INTO raw_compositions (project_id, id, seq, title, description, tags, reporter_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        "INSERT INTO raw_compositions (project_id, id, seq, title, description, tags, reporter_id, client_context)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
     )
     .bind(ctx.project_id)
     .bind(&id)
@@ -176,6 +178,7 @@ pub async fn submit(
     .bind(req.description.trim())
     .bind(&tags)
     .bind(ctx.user_id)
+    .bind(&req.client_context)
     .execute(&mut *tx)
     .await?;
 

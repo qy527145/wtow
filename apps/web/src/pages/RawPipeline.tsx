@@ -30,6 +30,7 @@ import {
   Segmented,
   Tag,
 } from "../components/ui";
+import { browserContext } from "../lib/context";
 import { fmtTime, RAW_STATUS_LABEL } from "../lib/format";
 import { POLL_MS, useMemberNames, useProject, useSlug } from "../lib/hooks";
 import { useInvalidatePipelines } from "../lib/invalidate";
@@ -237,6 +238,7 @@ function SubmitRawDialog({
           .map((t) => t.trim())
           .filter(Boolean),
         attachments.map((a) => a.id),
+        browserContext(),
       ),
     onSuccess: (r) => {
       invalidate();

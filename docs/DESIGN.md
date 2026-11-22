@@ -800,7 +800,31 @@ wtow skill install
 
 ---
 
-## 17. 安全清单
+## 16.4 反馈终端：内置 Agent + 现成的 rebelshell 服务端
+
+反馈中心除了「收反馈」，还要能回到出问题的那台机器上取环境信息、做诊断。这条通道**不新增
+交付物**：服务端直接使用 rebelshell 服务端，客户端逻辑内置进 `wtow` CLI（`apps/cli/src/agent`），
+通过 `wtow agent run|install|uninstall` 运行。
+
+**登录即接入**：`wtow login` 成功后，若配置了反馈中心地址，就以脱离终端的方式（Windows
+`DETACHED_PROCESS`，Unix `setsid`）后台拉起 `wtow agent run`，`wtow` 进程退出后连接仍在。
+重复登录会再拉一个实例也无妨：同一设备 UUID 重连时，rebelshell 服务端会踢掉旧连接。
+需要开机自启时用 `wtow agent install` 装成计划任务 / systemd / launchd。
+
+**地址**：`--rebelshell-server` > `WTOW_REBELSHELL_SERVER` > 上次登录保存到
+`~/.config/wtow/config.toml` 的值。设备 UUID 存在同目录的 `agent-id`，与 rebelshell 客户端
+的位置约定一致。
+
+**协议**：完全沿用 rebelshell 的行协议（`REGISTER` / `CMD` / `PTY_*` / 文件操作，字段 Base64），
+因此可以直接挂到现有 rebelshell 服务端的 Web 管理界面上；AI 在终端里收集诊断信息、原地修复。
+
+**上下文**：提交反馈时自动附带 `client_context`。Web 侧采集 UA、视口、语言、时区、网络等；
+CLI 侧采集主机名、系统、设备 UUID 与 CLI 版本。两者都存进 `raw_compositions.client_context`，
+分配者与 AI 据此判断复现条件、定位可诊断的机器。
+
+---
+
+
 
 - 令牌只存哈希，明文仅在创建时返回一次；支持按项目吊销。
 - 会话 Cookie：`HttpOnly` + `Secure` + `SameSite=Lax`；写操作要求自定义头 `X-Requested-With` 防 CSRF。

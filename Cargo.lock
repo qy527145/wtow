@@ -3123,10 +3123,12 @@ dependencies = [
  "clap",
  "contract",
  "dirs 7.0.0",
+ "libc",
  "reqwest",
  "serde",
  "serde_json",
  "toml",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

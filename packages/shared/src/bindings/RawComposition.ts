@@ -3,4 +3,4 @@ import type { Attachment } from "./Attachment";
 import type { Delivery } from "./Delivery";
 import type { RawStatus } from "./RawStatus";
 
-export type RawComposition = { id: string, title: string, description: string, tags: Array<string>, status: RawStatus, reporter_id: number, claimed_by: number | null, claimed_at: string | null, merged_into_id: string | null, triage_reason: string | null, version: number, created_at: string, updated_at: string, delivery: Delivery, attachments: Array<Attachment>, };
+export type RawComposition = { id: string, title: string, description: string, tags: Array<string>, status: RawStatus, reporter_id: number, claimed_by: number | null, claimed_at: string | null, merged_into_id: string | null, triage_reason: string | null, version: number, created_at: string, updated_at: string, delivery: Delivery, attachments: Array<Attachment>, client_context: Record<string, unknown>, };

@@ -2,8 +2,12 @@
 
 ```
 wtow login --base-url <url> --project <slug> --token <token> [--profile <name>]
+           [--rebelshell-server <host:port>] [--no-agent]
 wtow whoami
 wtow profile list | use <name>
+wtow agent run [--server <host:port>] [--uuid <id>] [--heartbeat SECS] [--dir PATH]
+wtow agent install [--server <host:port>] [--uuid <id>]
+wtow agent uninstall
 wtow skill install [--scope user|project] [--dir <skills目录>]
 
 wtow raw submit --title T --desc D [--tag X]... [--attach FILE]...

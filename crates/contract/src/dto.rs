@@ -231,6 +231,11 @@ pub struct SubmitRawReq {
     pub tags: Vec<String>,
     #[serde(default)]
     pub attachment_ids: Vec<String>,
+    /// 提交方自动采集的环境上下文（浏览器 UA/视口、CLI 的主机与终端标识等）。
+    /// 反馈中心据此定位可诊断的机器；字段都可能缺失，下游按可选处理。
+    #[serde(default)]
+    #[ts(type = "Record<string, unknown>")]
+    pub client_context: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -264,6 +269,9 @@ pub struct RawComposition {
     pub delivery: Delivery,
     #[serde(default)]
     pub attachments: Vec<Attachment>,
+    #[serde(default)]
+    #[ts(type = "Record<string, unknown>")]
+    pub client_context: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]

