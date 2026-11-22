@@ -116,6 +116,9 @@ enum AgentCmd {
         heartbeat: Option<u64>,
         #[arg(long)]
         dir: Option<PathBuf>,
+        /// 内部使用：连接失败时静默退出（后台拉起的实例），前台默认持续重连。
+        #[arg(long, hide = true)]
+        exit_on_error: bool,
     },
     /// 安装为开机自启的后台服务（Windows 需管理员，Linux 需 root）
     Install {
@@ -889,7 +892,7 @@ fn start_feedback_agent(server: Option<&str>, no_agent: bool, json: bool) -> Val
             report = json!({ "started": true, "server": server, "log": log });
             if !json {
                 let log = log.map(|p| format!("，日志：{p}")).unwrap_or_default();
-                println!("[wtow] 反馈终端已在后台连接 {server}{log}");
+                println!("[wtow] 反馈终端已在后台启动 {server}{log}");
             }
         }
         Err(err) => {
@@ -938,6 +941,7 @@ fn agent_cmd(g: &Global, cmd: &AgentCmd) {
             uuid,
             heartbeat,
             dir,
+            exit_on_error,
         } => {
             let Some(server) = feedback_server(server.as_ref(), &cfg) else {
                 fail(
@@ -960,7 +964,7 @@ fn agent_cmd(g: &Global, cmd: &AgentCmd) {
                     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
                 }),
             };
-            if let Err(err) = agent::run(config) {
+            if let Err(err) = agent::run(config, *exit_on_error) {
                 fail(1, g.json, "AGENT", &err);
             }
         }

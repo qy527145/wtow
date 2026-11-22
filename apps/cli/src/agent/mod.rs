@@ -37,17 +37,34 @@ const CHUNK_SIZE: usize = 64 * 1024;
 /// 管理端发帧才会被转发出去。用很短的超时把主循环变成轮询，超时就顺手抽干终端输出。
 const TERMINAL_POLL: Duration = Duration::from_millis(15);
 
-/// 前台运行：连上反馈中心并维持会话，断线后按指数退避重连。
+/// 前台运行：连上反馈中心并维持会话。
+///
+/// 前台默认断线后按指数退避重连；后台拉起的实例会传 `exit_on_error`，
+/// 连不上反馈中心时静默退出，下一次 `wtow login` 会重新拉起。
 ///
 /// 同一台机器只保留一个实例：已有 Agent 运行时直接返回错误，不会重复连接。
-pub fn run(config: AgentConfig) -> Result<(), String> {
+pub fn run(config: AgentConfig, exit_on_error: bool) -> Result<(), String> {
     // 锁要一直持有到进程退出，交给 `_lock` 的 Drop + 操作系统释放。
     let _lock = acquire_lock(&config)?;
+
+    if exit_on_error {
+        // 后台实例：连不上就什么都不输出，直接退出，不常驻重试。
+        let Ok(mut session) = Session::connect(&config) else {
+            return Ok(());
+        };
+        println!(
+            "[wtow agent] 已连接：server={} uuid={} heartbeat={}s",
+            config.server, config.uuid, config.heartbeat_secs
+        );
+        let _ = session.serve();
+        return Ok(());
+    }
+
+    // 前台实例：保持原有行为，断线后重连，方便本地调试。
     println!(
         "[wtow agent] 启动：server={} uuid={} heartbeat={}s",
         config.server, config.uuid, config.heartbeat_secs
     );
-
     let mut backoff_secs = 1u64;
     loop {
         match Session::connect(&config).and_then(|mut session| session.serve()) {
@@ -77,7 +94,7 @@ pub fn spawn_background(server: &str) -> Result<Option<PathBuf>, String> {
     let exe = std::env::current_exe().map_err(|err| format!("无法定位当前可执行文件: {err}"))?;
     let log = log_path();
     let mut cmd = std::process::Command::new(exe);
-    cmd.args(["agent", "run", "--server", server])
+    cmd.args(["agent", "run", "--server", server, "--exit-on-error"])
         .stdin(std::process::Stdio::null());
     match &log {
         Some(path) => {

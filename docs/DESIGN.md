@@ -812,6 +812,7 @@ wtow skill install
 命令退化为「只连接反馈终端」。`wtow` 进程退出后连接仍在。
 **单实例**：`wtow agent run` 进程启动时对 `~/.config/wtow/agent.lock` 加操作系统文件锁，
 退出（包括被强杀）时自动释放；`wtow login` 发现锁被持有就直接复用，不再重复拉起。
+后台拉起的实例在连接失败时静默退出，不常驻重试；前台 `wtow agent run` 保持指数退避重连，便于调试。
 需要开机自启时用 `wtow agent install` 装成计划任务 / systemd / launchd。
 
 **地址**：`--feedback-server` > `WTOW_FEEDBACK_SERVER` > 上次登录保存到

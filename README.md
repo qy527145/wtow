@@ -143,7 +143,8 @@ wtow agent run --server 10.0.0.5:9705
 - 同一台机器只保留一个反馈终端：`wtow agent run` 用 `<配置目录>/wtow/agent.lock` 做单实例锁，
   `login` 发现已有实例在跑就跳过启动。进程退出（包括被强杀）时锁自动释放，不会留下陈旧状态。
 - 后台实例与终端脱钩（Windows 用 `DETACHED_PROCESS`，Unix 用 `setsid`），日志写入
-  `<配置目录>/wtow/agent.log`。
+  `<配置目录>/wtow/agent.log`。后台实例连不上反馈中心时会静默退出，不常驻重试；
+  前台 `wtow agent run` 仍按指数退避重连，方便本地调试。
 - 设备 UUID 存在 `<配置目录>/wtow/agent-id`，与现成客户端的位置约定一致。
 - Web 与 CLI 提交反馈时都会附带 `client_context`：浏览器侧是 UA、视口、语言、时区、网络；
   CLI 侧是主机名、系统、设备 UUID 与 CLI 版本。反馈中心据此定位可诊断的机器。
